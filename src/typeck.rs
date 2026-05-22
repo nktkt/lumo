@@ -195,6 +195,7 @@ impl FnChecker<'_> {
             ExprKind::Int(_) => Ok(Type::Int),
             ExprKind::Float(_) => Ok(Type::Float),
             ExprKind::Bool(_) => Ok(Type::Bool),
+            ExprKind::Str(_) => Ok(Type::Str),
             ExprKind::Var(name) => self.vars.get(name).copied().ok_or_else(|| {
                 Diagnostic::error(format!("未定義の変数: {}", name))
                     .with_code("E0101")

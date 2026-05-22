@@ -125,6 +125,11 @@ fn loops() {
     run_ok("loops");
 }
 
+#[test]
+fn strings() {
+    run_ok("string");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -217,4 +222,14 @@ fn err_mix_types() {
 #[test]
 fn err_break_outside() {
     run_err("err_break_outside", "E0203");
+}
+
+#[test]
+fn err_str_arith() {
+    run_err("err_str_arith", "E0200");
+}
+
+#[test]
+fn err_unterminated_string() {
+    run_err("err_unterminated_string", "E0004");
 }

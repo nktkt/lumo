@@ -9,6 +9,7 @@ pub enum Tok {
     // リテラル・識別子
     Int(i64),
     Float(f64),
+    Str(String),
     Ident(String),
     // キーワード
     Fn,
@@ -86,6 +87,60 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             while i < n && chars[i].1 != '\n' {
                 i += 1;
             }
+            continue;
+        }
+
+        // 文字列リテラル "..."（エスケープ: \n \t \\ \"）
+        if c == '"' {
+            let start = off;
+            i += 1; // 開きクォートを消費
+            let mut s = String::new();
+            loop {
+                if i >= n || chars[i].1 == '\n' {
+                    return Err(Diagnostic::error("文字列が閉じられていません")
+                        .with_code("E0004")
+                        .at(Span::new(start, byte_at(&chars, src, i))));
+                }
+                let ch = chars[i].1;
+                if ch == '"' {
+                    i += 1; // 閉じクォートを消費
+                    break;
+                }
+                if ch == '\\' {
+                    let esc_start = chars[i].0;
+                    i += 1;
+                    if i >= n {
+                        return Err(Diagnostic::error("文字列が閉じられていません")
+                            .with_code("E0004")
+                            .at(Span::new(start, src.len())));
+                    }
+                    let decoded = match chars[i].1 {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        '\\' => '\\',
+                        '"' => '"',
+                        '0' => '\0',
+                        other => {
+                            return Err(Diagnostic::error(format!(
+                                "不正なエスケープ: \\{}",
+                                other
+                            ))
+                            .with_code("E0004")
+                            .at(Span::new(esc_start, byte_at(&chars, src, i + 1))));
+                        }
+                    };
+                    s.push(decoded);
+                    i += 1;
+                } else {
+                    s.push(ch);
+                    i += 1;
+                }
+            }
+            toks.push(Token {
+                kind: Tok::Str(s),
+                span: Span::new(start, byte_at(&chars, src, i)),
+            });
             continue;
         }
 

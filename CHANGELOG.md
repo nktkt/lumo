@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.7.0]
+
+### Added
+
+- `string` type with immutable string literals (`"..."`) supporting `\n`, `\t`, `\r`, `\\`, `\"`, `\0` escapes. Strings can be stored, passed, returned, and printed (no concatenation or comparison yet).
+- `docs/tutorial.md`, a getting-started guide.
+- `E0004` diagnostics for unterminated strings and invalid escapes.
+
 ## [0.6.0]
 
 ### Added

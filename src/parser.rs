@@ -134,6 +134,7 @@ impl Parser {
                 "int" => Ok((Type::Int, span)),
                 "bool" => Ok((Type::Bool, span)),
                 "float" => Ok((Type::Float, span)),
+                "string" => Ok((Type::Str, span)),
                 _ => Err(Diagnostic::error(format!("不明な型: {}", name))
                     .with_code("E0300")
                     .at(span)),
@@ -397,6 +398,10 @@ impl Parser {
             }),
             Tok::Float(x) => Ok(Expr {
                 kind: ExprKind::Float(x),
+                span,
+            }),
+            Tok::Str(s) => Ok(Expr {
+                kind: ExprKind::Str(s),
                 span,
             }),
             Tok::True => Ok(Expr {

@@ -1,4 +1,4 @@
-fn f(x: string) -> int {
+fn f(x: vector) -> int {
     return 0;
 }
 

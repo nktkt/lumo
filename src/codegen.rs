@@ -56,12 +56,13 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    /// Lumo の型に対応する LLVM の基本型 (int=i64, bool=i1, float=f64)
+    /// Lumo の型に対応する LLVM の基本型 (int=i64, bool=i1, float=f64, string=ptr)
     fn basic_ty(&self, ty: Type) -> BasicTypeEnum<'ctx> {
         match ty {
             Type::Int => self.ctx.i64_type().into(),
             Type::Bool => self.ctx.bool_type().into(),
             Type::Float => self.ctx.f64_type().into(),
+            Type::Str => self.ctx.ptr_type(AddressSpace::default()).into(),
         }
     }
 
@@ -71,6 +72,11 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().const_int(0, false).into(),
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::Float => self.ctx.f64_type().const_float(0.0).into(),
+            Type::Str => self
+                .ctx
+                .ptr_type(AddressSpace::default())
+                .const_null()
+                .into(),
         }
     }
 
@@ -196,6 +202,12 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                     Type::Float => {
                         let fmt = self.global_str("%g\n", "fmt_float");
+                        self.builder
+                            .build_call(printf, &[fmt.into(), v.into()], "printf_call")
+                            .unwrap();
+                    }
+                    Type::Str => {
+                        let fmt = self.global_str("%s\n", "fmt_str");
                         self.builder
                             .build_call(printf, &[fmt.into(), v.into()], "printf_call")
                             .unwrap();
@@ -340,6 +352,15 @@ impl<'ctx> CodeGen<'ctx> {
                 self.ctx.bool_type().const_int(u64::from(*b), false).into(),
                 Type::Bool,
             ),
+            ExprKind::Str(s) => {
+                // 文字列リテラルは NUL 終端のグローバル定数として置き、そのポインタを値にする
+                let g = self
+                    .builder
+                    .build_global_string_ptr(s, "strlit")
+                    .unwrap()
+                    .as_pointer_value();
+                (g.into(), Type::Str)
+            }
             ExprKind::Var(name) => {
                 let (ptr, ty) = self.vars[name];
                 let v = self
