@@ -145,6 +145,11 @@ fn string_concat() {
     run_ok("string_concat");
 }
 
+#[test]
+fn arrays() {
+    run_ok("arrays");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -262,4 +267,19 @@ fn err_reserved_name() {
 #[test]
 fn err_out_of_scope() {
     run_err("err_out_of_scope", "E0101");
+}
+
+#[test]
+fn err_index_type() {
+    run_err("err_index_type", "E0200");
+}
+
+#[test]
+fn err_index_nonarray() {
+    run_err("err_index_nonarray", "E0205");
+}
+
+#[test]
+fn err_array_mixed() {
+    run_err("err_array_mixed", "E0200");
 }

@@ -54,14 +54,15 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.10, in progress)
+## Language (v0.11, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
 
-- Four value types: `int` (64-bit), `bool`, `float` (64-bit), `string` — no implicit conversions
-- Literals: `42`, `true` / `false`, `3.14`, `"text"` (with `\n` `\t` `\\` `\"` escapes)
+- Types: `int` (64-bit), `bool`, `float` (64-bit), `string`, and arrays `[T]` — no implicit conversions
+- Literals: `42`, `true` / `false`, `3.14`, `"text"`, `[1, 2, 3]`
 - Strings: `+` concatenates (heap-allocated), `==`/`!=` compare by value
+- Arrays: `a[i]` read/write, `len(a)`; heap-allocated, scalar elements
 - Numeric conversions via the `int(x)` / `float(x)` built-ins
 - Variables are lexically block-scoped, with shadowing
 - Arithmetic: `+ - * /` on two ints or two floats, `%` (int only), unary minus `-x`

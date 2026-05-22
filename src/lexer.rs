@@ -29,6 +29,8 @@ pub enum Tok {
     RParen,    // )
     LBrace,    // {
     RBrace,    // }
+    LBracket,  // [
+    RBracket,  // ]
     Comma,     // ,
     Semicolon, // ;
     Colon,     // :
@@ -232,6 +234,8 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             ')' => Tok::RParen,
             '{' => Tok::LBrace,
             '}' => Tok::RBrace,
+            '[' => Tok::LBracket,
+            ']' => Tok::RBracket,
             ',' => Tok::Comma,
             ';' => Tok::Semicolon,
             ':' => Tok::Colon,

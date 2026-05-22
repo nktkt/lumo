@@ -56,6 +56,13 @@ pub enum ExprKind {
         name: String,
         args: Vec<Expr>,
     },
+    /// 配列リテラル `[e1, e2, ...]`（要素は同じ型・1個以上）
+    Array(Vec<Expr>),
+    /// 添字アクセス `array[index]`
+    Index {
+        array: Box<Expr>,
+        index: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -70,8 +77,9 @@ pub enum StmtKind {
         name: String,
         value: Expr,
     },
+    /// 代入。左辺 `target` は変数(`Var`)か添字(`Index`)。
     Assign {
-        name: String,
+        target: Expr,
         value: Expr,
     },
     Print(Expr),

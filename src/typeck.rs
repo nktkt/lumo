@@ -121,18 +121,21 @@ impl FnChecker<'_> {
                 // 最内スコープに束縛（外側の同名変数はシャドーイング）
                 self.declare(name, t);
             }
-            StmtKind::Assign { name, value } => {
+            StmtKind::Assign { target, value } => {
+                // 左辺は変数か添字のみ（lvalue）。その型と右辺の型を一致させる。
+                let target_ty = match &target.kind {
+                    ExprKind::Var(_) | ExprKind::Index { .. } => self.check_expr(target)?,
+                    _ => {
+                        return Err(Diagnostic::error("代入先が変数でも配列要素でもありません")
+                            .with_code("E0204")
+                            .at(target.span));
+                    }
+                };
                 let t = self.check_expr(value)?;
-                let var_ty = self.lookup(name).ok_or_else(|| {
-                    Diagnostic::error(format!("未定義の変数への代入: {}", name))
-                        .with_code("E0101")
-                        .at(stmt.span)
-                })?;
-                if t != var_ty {
+                if t != target_ty {
                     return Err(Diagnostic::error(format!(
-                        "変数 {} は {} 型ですが {} 型を代入しようとしました",
-                        name,
-                        var_ty.name(),
+                        "代入先は {} 型ですが {} 型を代入しようとしました",
+                        target_ty.name(),
                         t.name()
                     ))
                     .with_code("E0200")
@@ -140,7 +143,14 @@ impl FnChecker<'_> {
                 }
             }
             StmtKind::Print(e) => {
-                self.check_expr(e)?;
+                let t = self.check_expr(e)?;
+                if matches!(t, Type::Array(_)) {
+                    return Err(Diagnostic::error(
+                        "print できるのは int/bool/float/string です（配列は不可）",
+                    )
+                    .with_code("E0200")
+                    .at(e.span));
+                }
             }
             StmtKind::Return(e) => {
                 let t = self.check_expr(e)?;
@@ -337,6 +347,28 @@ impl FnChecker<'_> {
                     });
                 }
 
+                // 組み込み len(): 文字列か配列の長さ -> int
+                if name == "len" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "len() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let at = self.check_expr(&args[0])?;
+                    if !matches!(at, Type::Str | Type::Array(_)) {
+                        return Err(Diagnostic::error(format!(
+                            "len() は string か配列に使えますが {} が渡されました",
+                            at.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    return Ok(Type::Int);
+                }
+
                 let (param_types, ret) = {
                     let sig = self.sigs.get(name).ok_or_else(|| {
                         Diagnostic::error(format!("未定義の関数: {}", name))
@@ -361,6 +393,43 @@ impl FnChecker<'_> {
                 }
                 Ok(ret)
             }
+            ExprKind::Array(elems) => {
+                // 空の配列リテラルは要素型を推論できないので不可
+                let first = elems.first().ok_or_else(|| {
+                    Diagnostic::error("空の配列リテラルは書けません（要素型を推論できません）")
+                        .with_code("E0206")
+                        .at(e.span)
+                })?;
+                let elem_ty = self.check_expr(first)?;
+                let elem = elem_ty.as_elem().ok_or_else(|| {
+                    Diagnostic::error(format!(
+                        "配列の要素にできるのは int/bool/float/string です（{} は不可）",
+                        elem_ty.name()
+                    ))
+                    .with_code("E0206")
+                    .at(first.span)
+                })?;
+                // 残りの要素も同じ型か検査
+                for el in &elems[1..] {
+                    let t = self.check_expr(el)?;
+                    expect(elem_ty, t, el.span)?;
+                }
+                Ok(Type::Array(elem))
+            }
+            ExprKind::Index { array, index } => {
+                let arr_ty = self.check_expr(array)?;
+                let it = self.check_expr(index)?;
+                expect(Type::Int, it, index.span)?;
+                match arr_ty {
+                    Type::Array(elem) => Ok(elem.to_type()),
+                    other => Err(Diagnostic::error(format!(
+                        "添字でアクセスできるのは配列だけですが {} が使われています",
+                        other.name()
+                    ))
+                    .with_code("E0205")
+                    .at(array.span)),
+                }
+            }
         }
     }
 }
@@ -381,7 +450,7 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
 
 /// 型名・組み込み関数名として予約されている識別子か（関数名に使えない）。
 fn is_reserved_name(name: &str) -> bool {
-    matches!(name, "int" | "float" | "bool" | "string")
+    matches!(name, "int" | "float" | "bool" | "string" | "len")
 }
 
 fn numeric_required(got: Type, span: Span) -> Diagnostic {
