@@ -14,6 +14,7 @@ use std::process::Command;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
+use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
@@ -467,6 +468,39 @@ impl<'ctx> CodeGen<'ctx> {
         g
     }
 
+    /// LLVM の最適化パスをモジュールに適用する（level 0 は何もしない）。
+    /// `default<On>` パイプライン（mem2reg・インライン化・定数畳み込み等）を走らせる。
+    pub fn optimize(&self, level: u8) -> Result<(), String> {
+        if level == 0 {
+            return Ok(());
+        }
+        let tm = self.host_target_machine()?;
+        self.module
+            .run_passes(
+                &format!("default<O{}>", level),
+                &tm,
+                PassBuilderOptions::create(),
+            )
+            .map_err(|e| e.to_string())
+    }
+
+    /// ホスト向けの TargetMachine を作る（最適化とオブジェクト出力で共用）。
+    fn host_target_machine(&self) -> Result<TargetMachine, String> {
+        Target::initialize_all(&InitializationConfig::default());
+        let triple = TargetMachine::get_default_triple();
+        let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
+        target
+            .create_target_machine(
+                &triple,
+                "generic",
+                "",
+                OptimizationLevel::Default,
+                RelocMode::PIC,
+                CodeModel::Default,
+            )
+            .ok_or_else(|| "ターゲットマシンを作成できません".to_string())
+    }
+
     pub fn ir_string(&self) -> String {
         self.module.print_to_string().to_string()
     }
@@ -488,19 +522,7 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// オブジェクトファイルを書き出し、clang でリンクしてネイティブ実行ファイルを作る
     pub fn build_executable(&self, out: &str) -> Result<(), String> {
-        Target::initialize_all(&InitializationConfig::default());
-        let triple = TargetMachine::get_default_triple();
-        let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
-        let tm = target
-            .create_target_machine(
-                &triple,
-                "generic",
-                "",
-                OptimizationLevel::Default,
-                RelocMode::PIC,
-                CodeModel::Default,
-            )
-            .ok_or("ターゲットマシンを作成できません")?;
+        let tm = self.host_target_machine()?;
 
         let obj_path = format!("{}.o", out);
         tm.write_to_file(&self.module, FileType::Object, Path::new(&obj_path))

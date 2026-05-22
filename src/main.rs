@@ -17,28 +17,47 @@ use diagnostics::Diagnostic;
 use std::process::exit;
 
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.4");
+    eprintln!("Lumo compiler 0.5");
     eprintln!("使い方:");
-    eprintln!("  lumo run     <file.lum>    # JITでその場で実行する");
-    eprintln!("  lumo build   <file.lum>    # ネイティブ実行ファイルを生成する");
-    eprintln!("  lumo emit-ir <file.lum>    # 生成されるLLVM IRを表示する");
+    eprintln!("  lumo <command> [-O0|-O1|-O2|-O3] <file.lum>");
+    eprintln!();
+    eprintln!("コマンド:");
+    eprintln!("  run       JITでその場で実行する");
+    eprintln!("  build     ネイティブ実行ファイルを生成する");
+    eprintln!("  emit-ir   生成されるLLVM IRを表示する");
+    eprintln!();
+    eprintln!("  -O0..-O3  最適化レベル（既定: -O0。emit-ir で最適化前後を比較できる）");
     exit(1);
 }
 
 fn main() {
+    // 引数を解析する: コマンド・ファイル・最適化レベル(-O0..-O3)。
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3 {
-        usage();
+    let mut cmd: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut opt: u8 = 0;
+    for arg in &args[1..] {
+        match arg.as_str() {
+            "-O0" => opt = 0,
+            "-O1" => opt = 1,
+            "-O2" => opt = 2,
+            "-O3" => opt = 3,
+            s if cmd.is_none() => cmd = Some(s.to_string()),
+            s if path.is_none() => path = Some(s.to_string()),
+            _ => usage(),
+        }
     }
-    let cmd = args[1].as_str();
-    let path = &args[2];
+    let (Some(cmd), Some(path)) = (cmd, path) else {
+        usage();
+    };
+    let cmd = cmd.as_str();
 
-    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         eprintln!("ファイルを読めません {}: {}", path, e);
         exit(1);
     });
 
-    // 字句解析・構文解析・コード生成。エラーは位置付き診断として表示する。
+    // 字句解析・構文解析・型検査・コード生成。エラーは位置付き診断として表示する。
     let context = inkwell::context::Context::create();
     let mut cg = codegen::CodeGen::new(&context, "lumo");
 
@@ -50,9 +69,15 @@ fn main() {
     })();
 
     if let Err(diag) = compiled {
-        eprint!("{}", diag.render(&src, path));
+        eprint!("{}", diag.render(&src, &path));
         exit(1);
     }
+
+    // 最適化パスを適用する（-O0 のときは何もしない）。
+    cg.optimize(opt).unwrap_or_else(|e| {
+        eprintln!("最適化エラー: {}", e);
+        exit(1);
+    });
 
     match cmd {
         "emit-ir" => {
@@ -67,7 +92,7 @@ fn main() {
         }
         "build" => {
             // 入力パスから拡張子を除いた名前を実行ファイル名にする (fib.lum -> fib)
-            let out = std::path::Path::new(path)
+            let out = std::path::Path::new(&path)
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "a.out".to_string());
