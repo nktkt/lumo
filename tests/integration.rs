@@ -39,6 +39,25 @@ fn run_ok(name: &str) {
     );
 }
 
+/// Emit LLVM IR for a case, optionally at an optimization level (e.g. "-O2").
+fn emit_ir(name: &str, opt: Option<&str>) -> String {
+    let lum = format!("tests/cases/{}.lum", name);
+    let mut cmd = Command::new(lumo());
+    cmd.arg("emit-ir");
+    if let Some(o) = opt {
+        cmd.arg(o);
+    }
+    cmd.arg(&lum);
+    let output = cmd.output().expect("failed to spawn lumo");
+    assert!(
+        output.status.success(),
+        "emit-ir for `{}` failed:\n{}",
+        name,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
 fn run_err(name: &str, expected_code: &str) {
     let lum = format!("tests/cases/{}.lum", name);
     let output = Command::new(lumo())
@@ -99,6 +118,35 @@ fn typed_fn() {
 #[test]
 fn float_math() {
     run_ok("float");
+}
+
+/// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
+/// IR has `alloca`s, the optimized IR should not.
+#[test]
+fn optimization_promotes_allocas() {
+    let unopt = emit_ir("fib", None);
+    let opt = emit_ir("fib", Some("-O2"));
+    assert!(
+        unopt.contains("alloca"),
+        "unoptimized IR was expected to contain allocas"
+    );
+    assert!(
+        !opt.contains("alloca"),
+        "`-O2` should remove allocas via mem2reg, but some remain:\n{}",
+        opt
+    );
+}
+
+/// Optimization must not change observable behavior.
+#[test]
+fn optimization_preserves_behavior() {
+    let expected = std::fs::read_to_string("tests/cases/fib.out").unwrap();
+    let output = Command::new(lumo())
+        .args(["run", "-O2", "tests/cases/fib.lum"])
+        .output()
+        .expect("failed to spawn lumo");
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
 }
 
 #[test]

@@ -41,6 +41,19 @@ cargo run -- build examples/fib.lum
 ./fib
 ```
 
+### Optimization
+
+Pass `-O0`/`-O1`/`-O2`/`-O3` (default `-O0`) to any command to run LLVM's
+optimization pipeline on the module:
+
+```sh
+# See how mem2reg, inlining, etc. transform the IR
+cargo run -- emit-ir -O2 examples/fib.lum
+
+# Optimized native build
+cargo run -- build -O2 examples/fib.lum
+```
+
 ## Language (v0.4, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference. In brief:
@@ -86,11 +99,17 @@ fn main() {
 | `src/lexer.rs`  | Tokenizer: source text into tokens |
 | `src/parser.rs` | Recursive-descent parser: tokens into an AST |
 | `src/ast.rs`    | AST node definitions |
-| `src/types.rs`  | The `Type` enum (`int` / `bool`) shared by typeck and codegen |
+| `src/types.rs`  | The `Type` enum (`int` / `bool` / `float`) shared by typeck and codegen |
 | `src/typeck.rs` | Type-checking pass: name resolution + type rules, with diagnostics |
-| `src/codegen.rs`| Lowers the (type-checked) AST to LLVM IR; JIT, object emission, IR printing |
+| `src/codegen.rs`| Lowers the (type-checked) AST to LLVM IR; optimization, JIT, object emission, IR printing |
 | `src/diagnostics.rs` | Error rendering with source spans and carets |
-| `src/main.rs`   | CLI driver (`run` / `build` / `emit-ir`) |
+| `src/main.rs`   | CLI driver (`run` / `build` / `emit-ir`, `-O` flag) |
+
+## Documentation
+
+- **[docs/language.md](docs/language.md)** — the language reference (for users)
+- **[docs/internals.md](docs/internals.md)** — compiler architecture (for contributors)
+- **[ROADMAP.md](ROADMAP.md)** — the long-range plan
 
 ## Roadmap
 
