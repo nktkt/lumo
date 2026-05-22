@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.10.0]
+
+### Added
+
+- A minimal runtime (`lumo_alloc`, currently backed by libc `malloc`) — Lumo's first heap allocation.
+- String concatenation with `+` (allocates a new heap string) and string equality with `==` / `!=`.
+
+### Notes
+
+- Heap memory is reclaimed only at program exit for now; an arena/region scheme is planned (see `docs/rfcs/0001-memory-model.md`).
+
 ## [0.9.0]
 
 ### Added

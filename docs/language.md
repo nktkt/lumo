@@ -48,10 +48,12 @@ automatically turned into a `float`, a `bool` is never treated as a number, and
 so on. Every operation requires operands of the expected type. To convert
 between numbers explicitly, use the [`int()` / `float()` built-ins](#conversions).
 
-`string` values are immutable literals: you can store them in variables, pass
-them to functions, return them, and `print` them, but there are **no string
-operators yet** — no concatenation and no comparison. (Those arrive with the
-heap/memory model in a later release.)
+`string` values are immutable (you cannot modify one in place), but you can
+build new ones: `+` **concatenates** two strings into a fresh heap string, and
+`==` / `!=` compare strings by value. Ordering comparisons (`<`, `<=`, `>`,
+`>=`) are not defined for strings. Concatenated strings are heap-allocated and
+currently reclaimed only at program exit; see
+[RFC 0001](rfcs/0001-memory-model.md) for the planned memory management.
 
 ## Literals
 
@@ -118,11 +120,13 @@ print x;         # 1
 
 Operate on two `int`s or two `float`s; both operands must be the same type, and
 the result has that same type. Unary minus `-x` negates an `int` or a `float`.
+Additionally, `+` **concatenates two `string`s**.
 
 ```lumo
-let a = 3 + 4;       # int
-let b = 1.5 * 2.0;   # float
-let c = -a;          # int
+let a = 3 + 4;             # int
+let b = 1.5 * 2.0;         # float
+let c = -a;                # int
+let s = "foo" + "bar";     # string -> "foobar"
 ```
 
 ### Modulo: `%`
@@ -136,6 +140,8 @@ let r = 10 % 3;      # 1
 ### Comparison: `== != < <= > >=`
 
 Operate on two `int`s or two `float`s of the same type and produce a `bool`.
+`==` and `!=` also compare two `string`s by value; ordering (`<`, `<=`, `>`,
+`>=`) is not defined for strings.
 
 ```lumo
 let same = (a == 7);     # bool

@@ -140,6 +140,11 @@ fn scope() {
     run_ok("scope");
 }
 
+#[test]
+fn string_concat() {
+    run_ok("string_concat");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]

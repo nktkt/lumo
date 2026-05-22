@@ -254,7 +254,20 @@ impl FnChecker<'_> {
                 let lt = self.check_expr(lhs)?;
                 let rt = self.check_expr(rhs)?;
                 match op {
-                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+                    BinOp::Add => {
+                        // 数値は加算、文字列は連結。どちらも両辺同型。
+                        if lt == Type::Str {
+                            expect(Type::Str, rt, rhs.span)?;
+                            Ok(Type::Str)
+                        } else {
+                            if !lt.is_numeric() {
+                                return Err(numeric_required(lt, lhs.span));
+                            }
+                            expect(lt, rt, rhs.span)?;
+                            Ok(lt)
+                        }
+                    }
+                    BinOp::Sub | BinOp::Mul | BinOp::Div => {
                         // 算術は int 同士 / float 同士。結果は同じ型。
                         if !lt.is_numeric() {
                             return Err(numeric_required(lt, lhs.span));
@@ -268,8 +281,20 @@ impl FnChecker<'_> {
                         expect(Type::Int, rt, rhs.span)?;
                         Ok(Type::Int)
                     }
-                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                        // 比較は int 同士 / float 同士 -> bool
+                    BinOp::Eq | BinOp::Ne => {
+                        // 等価比較は int 同士 / float 同士 / string 同士 -> bool
+                        if lt == Type::Str {
+                            expect(Type::Str, rt, rhs.span)?;
+                        } else {
+                            if !lt.is_numeric() {
+                                return Err(numeric_required(lt, lhs.span));
+                            }
+                            expect(lt, rt, rhs.span)?;
+                        }
+                        Ok(Type::Bool)
+                    }
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                        // 大小比較は int 同士 / float 同士 -> bool
                         if !lt.is_numeric() {
                             return Err(numeric_required(lt, lhs.span));
                         }
