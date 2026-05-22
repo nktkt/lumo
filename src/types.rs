@@ -4,6 +4,7 @@
 pub enum Type {
     Int,
     Bool,
+    Float,
 }
 
 impl Type {
@@ -11,6 +12,12 @@ impl Type {
         match self {
             Type::Int => "int",
             Type::Bool => "bool",
+            Type::Float => "float",
         }
+    }
+
+    /// 算術・比較が使える数値型か
+    pub fn is_numeric(self) -> bool {
+        matches!(self, Type::Int | Type::Float)
     }
 }

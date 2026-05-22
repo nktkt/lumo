@@ -155,6 +155,7 @@ impl FnChecker<'_> {
     fn check_expr(&mut self, e: &Expr) -> Result<Type, Diagnostic> {
         match &e.kind {
             ExprKind::Int(_) => Ok(Type::Int),
+            ExprKind::Float(_) => Ok(Type::Float),
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::Var(name) => self.vars.get(name).copied().ok_or_else(|| {
                 Diagnostic::error(format!("未定義の変数: {}", name))
@@ -165,8 +166,11 @@ impl FnChecker<'_> {
                 let t = self.check_expr(expr)?;
                 match op {
                     UnOp::Neg => {
-                        expect(Type::Int, t, expr.span)?;
-                        Ok(Type::Int)
+                        // 単項マイナスは数値(int/float)に使える
+                        if !t.is_numeric() {
+                            return Err(numeric_required(t, expr.span));
+                        }
+                        Ok(t)
                     }
                     UnOp::Not => {
                         expect(Type::Bool, t, expr.span)?;
@@ -178,14 +182,26 @@ impl FnChecker<'_> {
                 let lt = self.check_expr(lhs)?;
                 let rt = self.check_expr(rhs)?;
                 match op {
-                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+                        // 算術は int 同士 / float 同士。結果は同じ型。
+                        if !lt.is_numeric() {
+                            return Err(numeric_required(lt, lhs.span));
+                        }
+                        expect(lt, rt, rhs.span)?;
+                        Ok(lt)
+                    }
+                    BinOp::Mod => {
+                        // 剰余は int のみ
                         expect(Type::Int, lt, lhs.span)?;
                         expect(Type::Int, rt, rhs.span)?;
                         Ok(Type::Int)
                     }
                     BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                        expect(Type::Int, lt, lhs.span)?;
-                        expect(Type::Int, rt, rhs.span)?;
+                        // 比較は int 同士 / float 同士 -> bool
+                        if !lt.is_numeric() {
+                            return Err(numeric_required(lt, lhs.span));
+                        }
+                        expect(lt, rt, rhs.span)?;
                         Ok(Type::Bool)
                     }
                     BinOp::And | BinOp::Or => {
@@ -236,4 +252,13 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
         .with_code("E0200")
         .at(span))
     }
+}
+
+fn numeric_required(got: Type, span: Span) -> Diagnostic {
+    Diagnostic::error(format!(
+        "数値(int または float)が必要ですが {} が使われています",
+        got.name()
+    ))
+    .with_code("E0200")
+    .at(span)
 }

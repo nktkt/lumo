@@ -39,6 +39,7 @@ pub struct Expr {
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     Int(i64),
+    Float(f64),
     Bool(bool),
     Var(String),
     Unary {

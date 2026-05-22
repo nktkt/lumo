@@ -8,6 +8,7 @@ use crate::span::Span;
 pub enum Tok {
     // リテラル・識別子
     Int(i64),
+    Float(f64),
     Ident(String),
     // キーワード
     Fn,
@@ -85,23 +86,38 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             continue;
         }
 
-        // 整数リテラル
+        // 数値リテラル（整数 or 小数）
         if c.is_ascii_digit() {
             let begin = i;
             while i < n && chars[i].1.is_ascii_digit() {
                 i += 1;
             }
+            // 小数点の後ろに数字が続く場合のみ float とみなす（"1." や "1.x" は不可）
+            let is_float = i + 1 < n && chars[i].1 == '.' && chars[i + 1].1.is_ascii_digit();
+            if is_float {
+                i += 1; // '.' を消費
+                while i < n && chars[i].1.is_ascii_digit() {
+                    i += 1;
+                }
+            }
             let span = Span::new(off, byte_at(&chars, src, i));
             let s: String = chars[begin..i].iter().map(|(_, ch)| *ch).collect();
-            let v: i64 = s.parse().map_err(|_| {
-                Diagnostic::error(format!("数値が大きすぎます: {}", s))
-                    .with_code("E0003")
-                    .at(span)
-            })?;
-            toks.push(Token {
-                kind: Tok::Int(v),
-                span,
-            });
+            let kind = if is_float {
+                let v: f64 = s.parse().map_err(|_| {
+                    Diagnostic::error(format!("不正な小数: {}", s))
+                        .with_code("E0003")
+                        .at(span)
+                })?;
+                Tok::Float(v)
+            } else {
+                let v: i64 = s.parse().map_err(|_| {
+                    Diagnostic::error(format!("数値が大きすぎます: {}", s))
+                        .with_code("E0003")
+                        .at(span)
+                })?;
+                Tok::Int(v)
+            };
+            toks.push(Token { kind, span });
             continue;
         }
 

@@ -17,7 +17,7 @@ use diagnostics::Diagnostic;
 use std::process::exit;
 
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.2");
+    eprintln!("Lumo compiler 0.4");
     eprintln!("使い方:");
     eprintln!("  lumo run     <file.lum>    # JITでその場で実行する");
     eprintln!("  lumo build   <file.lum>    # ネイティブ実行ファイルを生成する");
