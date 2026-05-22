@@ -83,11 +83,13 @@ fn main() {
 
 ## Roadmap
 
-- Boolean type and logical operators (`&&`, `||`)
-- Strings and arrays
-- Optimization passes (mem2reg and friends)
-- A static type system
-- A REPL
+Lumo is heading from a proof of concept toward a small, fast, statically typed
+systems language with first-class tooling. See **[ROADMAP.md](ROADMAP.md)** for
+the long-range plan (types, a type system, modules, LSP/formatter/REPL,
+incremental + parallel compilation, WASM, and a path to 1.0).
+
+Nearest steps: source spans & rich diagnostics, a test harness + CI, then
+`bool`/`float` types.
 
 ## License
 
