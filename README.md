@@ -41,17 +41,21 @@ cargo run -- build examples/fib.lum
 ./fib
 ```
 
-## Language (v0.1)
+## Language (v0.3, in progress)
 
-- All values are 64-bit integers (`i64`)
+- Two value types: `int` (64-bit) and `bool`
+- Integer literals; `true` / `false`
 - Arithmetic: `+ - * / %`, unary minus `-x`
-- Comparison: `== != < <= > >=` (yields `1`/`0`)
-- Variables: `let x = expr;` and assignment `x = expr;`
-- Control flow: `if (cond) { } else { }`, `while (cond) { }`
+- Comparison: `== != < <= > >=` (yields a `bool`)
+- Logical: `&&`, `||` (short-circuit), `!` — operate on `bool`
+- Variables: `let x = expr;` and assignment `x = expr;` (assignment must keep the same type)
+- Control flow: `if (cond) { } else { }`, `while (cond) { }` — `cond` must be a `bool`
 - Functions: `fn name(args...) { ... return expr; }` — recursion and mutual recursion supported
-- Built-in: `print expr;` (prints an integer followed by a newline)
+  - For now, function parameters and return values are `int` only (typed signatures arrive with the type system in Phase 3)
+- Built-in: `print expr;` (prints an `int` or `bool`, followed by a newline)
 - Comments: `# to end of line`
 - Entry point: `fn main()`
+- Errors are reported with a code, source location, and a caret (e.g. `error[E0201]: ...`)
 
 ### Example
 

@@ -1,0 +1,13 @@
+# Booleans, comparisons, and logical operators
+fn main() {
+    print true;           # true
+    print false;          # false
+    print !false;         # true
+    print 3 < 5;          # true
+    print 5 <= 5;         # true
+    print 2 == 3;         # false
+    print true && false;  # false
+    print true || false;  # true
+    print 1 < 2 && 3 < 4; # true
+    return 0;
+}

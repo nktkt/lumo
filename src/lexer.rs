@@ -17,6 +17,8 @@ pub enum Tok {
     While,
     Return,
     Print,
+    True,
+    False,
     // 区切り
     LParen,    // (
     RParen,    // )
@@ -31,12 +33,15 @@ pub enum Tok {
     Star,
     Slash,
     Percent,
-    EqEq,  // ==
-    NotEq, // !=
-    Lt,    // <
-    Le,    // <=
-    Gt,    // >
-    Ge,    // >=
+    EqEq,     // ==
+    NotEq,    // !=
+    Lt,       // <
+    Le,       // <=
+    Gt,       // >
+    Ge,       // >=
+    Bang,     // !
+    AmpAmp,   // &&
+    PipePipe, // ||
     Eof,
 }
 
@@ -114,6 +119,8 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                 "while" => Tok::While,
                 "return" => Tok::Return,
                 "print" => Tok::Print,
+                "true" => Tok::True,
+                "false" => Tok::False,
                 _ => Tok::Ident(s),
             };
             toks.push(Token { kind, span });
@@ -127,6 +134,8 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                 ('!', '=') => Some(Tok::NotEq),
                 ('<', '=') => Some(Tok::Le),
                 ('>', '=') => Some(Tok::Ge),
+                ('&', '&') => Some(Tok::AmpAmp),
+                ('|', '|') => Some(Tok::PipePipe),
                 _ => None,
             };
             if let Some(kind) = kind {
@@ -153,6 +162,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             '%' => Tok::Percent,
             '<' => Tok::Lt,
             '>' => Tok::Gt,
+            '!' => Tok::Bang,
             _ => {
                 return Err(Diagnostic::error(format!("不正な文字: '{}'", c))
                     .with_code("E0001")

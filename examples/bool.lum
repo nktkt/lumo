@@ -1,0 +1,24 @@
+# Booleans and logical operators (Phase 2 / v0.3)
+#
+# Note: in v0.3 functions still take and return `int` only, so booleans live
+# inside expressions, variables, and control flow — not across call boundaries.
+# (Typed function signatures come with the type system in Phase 3.)
+
+fn main() {
+    let a = true;
+    let b = 3 < 5;       # bool from a comparison
+    print a && b;        # true
+    print a || false;    # true
+    print !b;            # false
+    print 2 == 2 && 1 < 0;  # false (short-circuits)
+
+    # a bool drives control flow directly
+    let i = 0;
+    while (i < 6) {
+        if (i % 2 == 0 && i > 0) {
+            print i;     # 2, 4
+        }
+        i = i + 1;
+    }
+    return 0;
+}
