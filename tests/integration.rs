@@ -97,6 +97,11 @@ fn typed_fn() {
 }
 
 #[test]
+fn float_math() {
+    run_ok("float");
+}
+
+#[test]
 fn err_undefined_var() {
     run_err("err_undefined_var", "E0101");
 }
@@ -149,4 +154,9 @@ fn err_unknown_type() {
 #[test]
 fn err_dup_param() {
     run_err("err_dup_param", "E0301");
+}
+
+#[test]
+fn err_mix_types() {
+    run_err("err_mix_types", "E0200");
 }

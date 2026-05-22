@@ -41,20 +41,22 @@ cargo run -- build examples/fib.lum
 ./fib
 ```
 
-## Language (v0.3, in progress)
+## Language (v0.4, in progress)
 
-- Two value types: `int` (64-bit) and `bool`
-- Integer literals; `true` / `false`
-- Arithmetic: `+ - * / %`, unary minus `-x`
+See **[docs/language.md](docs/language.md)** for the full reference. In brief:
+
+- Three value types: `int` (64-bit), `bool`, `float` (64-bit) — no implicit conversions
+- Literals: `42`, `true` / `false`, `3.14`
+- Arithmetic: `+ - * /` on two ints or two floats, `%` (int only), unary minus `-x`
 - Comparison: `== != < <= > >=` (yields a `bool`)
 - Logical: `&&`, `||` (short-circuit), `!` — operate on `bool`
 - Variables: `let x = expr;` and assignment `x = expr;` (assignment must keep the same type)
 - Control flow: `if (cond) { } else { }`, `while (cond) { }` — `cond` must be a `bool`
-- Functions with **typed signatures**: `fn name(p: int, q: bool) -> bool { ... }`
+- Functions with **typed signatures**: `fn name(p: int, q: float) -> bool { ... }`
   - Parameter types are required; the return type is optional and defaults to `int`
-  - `int` and `bool` may both be passed and returned; recursion and mutual recursion supported
+  - `int`, `bool`, and `float` may all be passed and returned; recursion and mutual recursion supported
   - A dedicated type-checking pass (`src/typeck.rs`) runs before code generation
-- Built-in: `print expr;` (prints an `int` or `bool`, followed by a newline)
+- Built-in: `print expr;` (prints an `int`, `bool`, or `float`, followed by a newline)
 - Comments: `# to end of line`
 - Entry point: `fn main()`
 - Errors are reported with a code, source location, and a caret (e.g. `error[E0201]: ...`)
@@ -62,7 +64,7 @@ cargo run -- build examples/fib.lum
 ### Example
 
 ```
-fn fib(n) {
+fn fib(n: int) -> int {
     if (n < 2) { return n; }
     return fib(n - 1) + fib(n - 2);
 }

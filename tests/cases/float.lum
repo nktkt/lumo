@@ -1,0 +1,15 @@
+# float arithmetic, comparison, and float params/returns across a call
+fn area(r: float) -> float {
+    return 3.14 * r * r;
+}
+
+fn main() {
+    print 1.5 + 2.25;   # 3.75
+    print 10.0 / 4.0;   # 2.5
+    print 2.0 < 3.0;    # true
+    print area(2.0);    # 12.56
+    let half = 0.5;
+    print half * 4.0;   # 2
+    print -1.5;         # -1.5
+    return 0;
+}

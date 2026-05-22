@@ -133,6 +133,7 @@ impl Parser {
             Tok::Ident(name) => match name.as_str() {
                 "int" => Ok((Type::Int, span)),
                 "bool" => Ok((Type::Bool, span)),
+                "float" => Ok((Type::Float, span)),
                 _ => Err(Diagnostic::error(format!("不明な型: {}", name))
                     .with_code("E0300")
                     .at(span)),
@@ -331,6 +332,10 @@ impl Parser {
         match self.next().kind {
             Tok::Int(n) => Ok(Expr {
                 kind: ExprKind::Int(n),
+                span,
+            }),
+            Tok::Float(x) => Ok(Expr {
+                kind: ExprKind::Float(x),
                 span,
             }),
             Tok::True => Ok(Expr {
