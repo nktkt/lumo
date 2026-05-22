@@ -197,7 +197,27 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, Diagnostic> {
-        self.parse_comparison()
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, Diagnostic> {
+        let mut lhs = self.parse_and()?;
+        while self.peek() == &Tok::PipePipe {
+            self.next();
+            let rhs = self.parse_and()?;
+            lhs = binary(BinOp::Or, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, Diagnostic> {
+        let mut lhs = self.parse_comparison()?;
+        while self.peek() == &Tok::AmpAmp {
+            self.next();
+            let rhs = self.parse_comparison()?;
+            lhs = binary(BinOp::And, lhs, rhs);
+        }
+        Ok(lhs)
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, Diagnostic> {
@@ -251,20 +271,20 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> Result<Expr, Diagnostic> {
-        if self.peek() == &Tok::Minus {
+        let op = match self.peek() {
+            Tok::Minus => Some(UnOp::Neg),
+            Tok::Bang => Some(UnOp::Not),
+            _ => None,
+        };
+        if let Some(op) = op {
             let op_span = self.cur_span();
             self.next();
             let operand = self.parse_unary()?;
-            // -x は 0 - x として表現する
             let span = op_span.merge(operand.span);
             return Ok(Expr {
-                kind: ExprKind::Binary {
-                    op: BinOp::Sub,
-                    lhs: Box::new(Expr {
-                        kind: ExprKind::Int(0),
-                        span: op_span,
-                    }),
-                    rhs: Box::new(operand),
+                kind: ExprKind::Unary {
+                    op,
+                    expr: Box::new(operand),
                 },
                 span,
             });
@@ -277,6 +297,14 @@ impl Parser {
         match self.next().kind {
             Tok::Int(n) => Ok(Expr {
                 kind: ExprKind::Int(n),
+                span,
+            }),
+            Tok::True => Ok(Expr {
+                kind: ExprKind::Bool(true),
+                span,
+            }),
+            Tok::False => Ok(Expr {
+                kind: ExprKind::Bool(false),
                 span,
             }),
             Tok::LParen => {

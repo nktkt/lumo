@@ -1,0 +1,6 @@
+fn main() {
+    if (5) {
+        print 1;
+    }
+    return 0;
+}

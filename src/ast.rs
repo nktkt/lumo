@@ -1,21 +1,32 @@
-//! 抽象構文木 (AST) の定義。すべての値は i64 として扱う。
+//! 抽象構文木 (AST) の定義。値の型は整数(int)と真偽値(bool)の2種類。
 //! 各ノードはソース位置 (Span) を持ち、診断メッセージで該当箇所を指せる。
 
 use crate::span::Span;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
+    // 算術 (int -> int)
     Add,
     Sub,
     Mul,
     Div,
     Mod,
+    // 比較 (int, int -> bool)
     Eq,
     Ne,
     Lt,
     Le,
     Gt,
     Ge,
+    // 論理 (bool, bool -> bool, 短絡評価)
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnOp {
+    Neg, // -x  (int -> int)
+    Not, // !x  (bool -> bool)
 }
 
 #[derive(Debug, Clone)]
@@ -27,7 +38,12 @@ pub struct Expr {
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     Int(i64),
+    Bool(bool),
     Var(String),
+    Unary {
+        op: UnOp,
+        expr: Box<Expr>,
+    },
     Binary {
         op: BinOp,
         lhs: Box<Expr>,

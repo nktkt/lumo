@@ -82,6 +82,16 @@ fn gcd() {
 }
 
 #[test]
+fn bool_and_logic() {
+    run_ok("bool");
+}
+
+#[test]
+fn short_circuit() {
+    run_ok("short_circuit");
+}
+
+#[test]
 fn err_undefined_var() {
     run_err("err_undefined_var", "E0101");
 }
@@ -104,4 +114,19 @@ fn err_parse() {
 #[test]
 fn err_no_main() {
     run_err("err_no_main", "E0100");
+}
+
+#[test]
+fn err_cond_type() {
+    run_err("err_cond_type", "E0201");
+}
+
+#[test]
+fn err_type_mismatch() {
+    run_err("err_type_mismatch", "E0200");
+}
+
+#[test]
+fn err_return_bool() {
+    run_err("err_return_bool", "E0202");
 }

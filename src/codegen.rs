@@ -1,9 +1,14 @@
 //! コード生成 (Code Generation): AST を LLVM IR に変換する。
 //!
-//! 設計を単純にするため、すべての値は i64 として扱う。
-//! 比較演算は LLVM では i1 を返すので、結果を i64 にゼロ拡張して統一する。
+//! 値の型は2種類: 整数 `int` (LLVM i64) と真偽値 `bool` (LLVM i1)。
+//! `gen_expr` は値とその型 `Ty` を返し、型の整合性をその場で検査する
+//! （正式な型検査パスは Phase 3 で導入予定。ここは式の型を下から組み立てる簡易版）。
+//!
 //! 変数はすべて alloca（スタック領域）に置き、load/store で読み書きする
 //! （最適化パスの mem2reg がレジスタに昇格してくれる）。
+//!
+//! 現状の制限: 関数の引数・戻り値は int のみ（型注釈が無いため）。
+//! bool を関数境界で受け渡すには型注釈と型検査(Phase 3)が必要。
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,20 +21,37 @@ use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
 use inkwell::types::BasicMetadataTypeEnum;
-use inkwell::values::{BasicMetadataValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValue, FunctionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, IntPredicate, OptimizationLevel};
 
 use crate::ast::*;
 use crate::diagnostics::Diagnostic;
+use crate::span::Span;
+
+/// Lumo の値の型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ty {
+    Int,
+    Bool,
+}
+
+impl Ty {
+    fn name(self) -> &'static str {
+        match self {
+            Ty::Int => "int",
+            Ty::Bool => "bool",
+        }
+    }
+}
 
 pub struct CodeGen<'ctx> {
     ctx: &'ctx Context,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
-    /// 現在の関数内の変数名 -> スタック上のアドレス
-    vars: HashMap<String, PointerValue<'ctx>>,
-    /// print 用の書式文字列 "%lld\n"（最初の print 時に1度だけ作る）
-    fmt: Option<PointerValue<'ctx>>,
+    /// 現在の関数内の変数名 -> (スタック上のアドレス, 型)
+    vars: HashMap<String, (PointerValue<'ctx>, Ty)>,
+    /// 生成済みのグローバル文字列（書式・"true"/"false" など）をキャッシュ
+    strings: HashMap<&'static str, PointerValue<'ctx>>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -39,7 +61,7 @@ impl<'ctx> CodeGen<'ctx> {
             module: ctx.create_module(name),
             builder: ctx.create_builder(),
             vars: HashMap::new(),
-            fmt: None,
+            strings: HashMap::new(),
         }
     }
 
@@ -47,11 +69,20 @@ impl<'ctx> CodeGen<'ctx> {
         self.ctx.i64_type()
     }
 
+    /// 型に対応する LLVM の整数型 (int=i64, bool=i1)
+    fn llvm_ty(&self, ty: Ty) -> inkwell::types::IntType<'ctx> {
+        match ty {
+            Ty::Int => self.ctx.i64_type(),
+            Ty::Bool => self.ctx.bool_type(),
+        }
+    }
+
     pub fn compile(&mut self, program: &Program) -> Result<(), Diagnostic> {
         // 1) C の printf を宣言（print の実装に使う）
         self.declare_printf();
 
         // 2) すべての関数シグネチャを先に宣言する（前方参照・相互再帰のため）
+        //    引数・戻り値は int (i64) 固定。
         for f in program {
             if self.module.get_function(&f.name).is_some() {
                 return Err(
@@ -105,12 +136,12 @@ impl<'ctx> CodeGen<'ctx> {
 
         self.vars.clear();
 
-        // 仮引数をスタックにコピーして、ローカル変数として扱えるようにする
+        // 仮引数(int)をスタックにコピーして、ローカル変数として扱えるようにする
         for (i, pname) in f.params.iter().enumerate() {
             let param = function.get_nth_param(i as u32).unwrap().into_int_value();
             let alloca = self.builder.build_alloca(self.i64t(), pname).unwrap();
             self.builder.build_store(alloca, param).unwrap();
-            self.vars.insert(pname.clone(), alloca);
+            self.vars.insert(pname.clone(), (alloca, Ty::Int));
         }
 
         for stmt in &f.body {
@@ -134,40 +165,90 @@ impl<'ctx> CodeGen<'ctx> {
             .unwrap_or(false)
     }
 
+    /// 現在コード生成中の関数
+    fn cur_function(&self) -> FunctionValue<'ctx> {
+        self.builder
+            .get_insert_block()
+            .unwrap()
+            .get_parent()
+            .unwrap()
+    }
+
+    fn expect(&self, want: Ty, got: Ty, span: Span) -> Result<(), Diagnostic> {
+        if want == got {
+            Ok(())
+        } else {
+            Err(Diagnostic::error(format!(
+                "型が合いません: {} が必要ですが {} が渡されました",
+                want.name(),
+                got.name()
+            ))
+            .with_code("E0200")
+            .at(span))
+        }
+    }
+
     fn gen_stmt(&mut self, stmt: &Stmt, function: FunctionValue<'ctx>) -> Result<(), Diagnostic> {
         match &stmt.kind {
             StmtKind::Let { name, value } => {
-                let v = self.gen_expr(value)?;
-                let alloca = match self.vars.get(name) {
-                    Some(p) => *p,
-                    None => {
-                        let a = self.builder.build_alloca(self.i64t(), name).unwrap();
-                        self.vars.insert(name.clone(), a);
-                        a
-                    }
-                };
+                let (v, ty) = self.gen_expr(value)?;
+                // 同名の再 let は新しい alloca で上書きする（型が変わってもよい）
+                let alloca = self.builder.build_alloca(self.llvm_ty(ty), name).unwrap();
+                self.vars.insert(name.clone(), (alloca, ty));
                 self.builder.build_store(alloca, v).unwrap();
             }
             StmtKind::Assign { name, value } => {
-                let v = self.gen_expr(value)?;
-                let ptr = *self.vars.get(name).ok_or_else(|| {
+                let (v, ty) = self.gen_expr(value)?;
+                let (ptr, var_ty) = *self.vars.get(name).ok_or_else(|| {
                     Diagnostic::error(format!("未定義の変数への代入: {}", name))
                         .with_code("E0101")
                         .at(stmt.span)
                 })?;
+                if ty != var_ty {
+                    return Err(Diagnostic::error(format!(
+                        "変数 {} は {} 型ですが {} 型を代入しようとしました",
+                        name,
+                        var_ty.name(),
+                        ty.name()
+                    ))
+                    .with_code("E0200")
+                    .at(stmt.span));
+                }
                 self.builder.build_store(ptr, v).unwrap();
             }
             StmtKind::Print(e) => {
-                let v = self.gen_expr(e)?;
-                let fmt = self.fmt_ptr();
+                let (v, ty) = self.gen_expr(e)?;
                 let printf = self.module.get_function("printf").unwrap();
-                let args: Vec<BasicMetadataValueEnum> = vec![fmt.into(), v.into()];
-                self.builder
-                    .build_call(printf, &args, "printf_call")
-                    .unwrap();
+                match ty {
+                    Ty::Int => {
+                        let fmt = self.global_str("%lld\n", "fmt_int");
+                        self.builder
+                            .build_call(printf, &[fmt.into(), v.into()], "printf_call")
+                            .unwrap();
+                    }
+                    Ty::Bool => {
+                        // bool は "true" / "false" として表示する
+                        let fmt = self.global_str("%s\n", "fmt_str");
+                        let t = self.global_str("true", "str_true");
+                        let f = self.global_str("false", "str_false");
+                        let s = self.builder.build_select(v, t, f, "boolstr").unwrap();
+                        self.builder
+                            .build_call(printf, &[fmt.into(), s.into()], "printf_call")
+                            .unwrap();
+                    }
+                }
             }
             StmtKind::Return(e) => {
-                let v = self.gen_expr(e)?;
+                let (v, ty) = self.gen_expr(e)?;
+                // 関数の戻り値は int 固定
+                if ty != Ty::Int {
+                    return Err(Diagnostic::error(format!(
+                        "関数は int を返しますが {} を返そうとしています",
+                        ty.name()
+                    ))
+                    .with_code("E0202")
+                    .at(e.span));
+                }
                 self.builder.build_return(Some(&v)).unwrap();
             }
             StmtKind::ExprStmt(e) => {
@@ -235,31 +316,89 @@ impl<'ctx> CodeGen<'ctx> {
         Ok(())
     }
 
-    /// 条件式を評価し、i64 の結果を「0 でなければ真」として i1 に変換する
+    /// 条件式を評価する。型は bool でなければならない。
     fn gen_cond(&mut self, e: &Expr) -> Result<IntValue<'ctx>, Diagnostic> {
-        let v = self.gen_expr(e)?;
-        let zero = self.i64t().const_int(0, false);
-        Ok(self
-            .builder
-            .build_int_compare(IntPredicate::NE, v, zero, "cond")
-            .unwrap())
+        let (v, ty) = self.gen_expr(e)?;
+        if ty != Ty::Bool {
+            return Err(Diagnostic::error(format!(
+                "条件は bool である必要がありますが {} が使われています",
+                ty.name()
+            ))
+            .with_code("E0201")
+            .at(e.span));
+        }
+        Ok(v)
     }
 
-    fn gen_expr(&mut self, e: &Expr) -> Result<IntValue<'ctx>, Diagnostic> {
+    fn gen_expr(&mut self, e: &Expr) -> Result<(IntValue<'ctx>, Ty), Diagnostic> {
         match &e.kind {
-            ExprKind::Int(n) => Ok(self.i64t().const_int(*n as u64, true)),
+            ExprKind::Int(n) => Ok((self.i64t().const_int(*n as u64, true), Ty::Int)),
+            ExprKind::Bool(b) => Ok((self.ctx.bool_type().const_int(*b as u64, false), Ty::Bool)),
             ExprKind::Var(name) => {
-                let ptr = *self.vars.get(name).ok_or_else(|| {
+                let (ptr, ty) = *self.vars.get(name).ok_or_else(|| {
                     Diagnostic::error(format!("未定義の変数: {}", name))
                         .with_code("E0101")
                         .at(e.span)
                 })?;
-                Ok(self
+                let v = self
                     .builder
-                    .build_load(self.i64t(), ptr, name)
+                    .build_load(self.llvm_ty(ty), ptr, name)
                     .unwrap()
-                    .into_int_value())
+                    .into_int_value();
+                Ok((v, ty))
             }
+            ExprKind::Unary { op, expr } => {
+                let (v, ty) = self.gen_expr(expr)?;
+                match op {
+                    UnOp::Neg => {
+                        self.expect(Ty::Int, ty, expr.span)?;
+                        Ok((self.builder.build_int_neg(v, "neg").unwrap(), Ty::Int))
+                    }
+                    UnOp::Not => {
+                        self.expect(Ty::Bool, ty, expr.span)?;
+                        Ok((self.builder.build_not(v, "not").unwrap(), Ty::Bool))
+                    }
+                }
+            }
+            ExprKind::Binary { op, lhs, rhs } => match op {
+                BinOp::And | BinOp::Or => self.gen_logical(*op, lhs, rhs),
+                _ => {
+                    let (l, lty) = self.gen_expr(lhs)?;
+                    let (r, rty) = self.gen_expr(rhs)?;
+                    match op {
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                            self.expect(Ty::Int, lty, lhs.span)?;
+                            self.expect(Ty::Int, rty, rhs.span)?;
+                            let b = &self.builder;
+                            let v = match op {
+                                BinOp::Add => b.build_int_add(l, r, "add").unwrap(),
+                                BinOp::Sub => b.build_int_sub(l, r, "sub").unwrap(),
+                                BinOp::Mul => b.build_int_mul(l, r, "mul").unwrap(),
+                                BinOp::Div => b.build_int_signed_div(l, r, "div").unwrap(),
+                                BinOp::Mod => b.build_int_signed_rem(l, r, "rem").unwrap(),
+                                _ => unreachable!(),
+                            };
+                            Ok((v, Ty::Int))
+                        }
+                        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                            self.expect(Ty::Int, lty, lhs.span)?;
+                            self.expect(Ty::Int, rty, rhs.span)?;
+                            let pred = match op {
+                                BinOp::Eq => IntPredicate::EQ,
+                                BinOp::Ne => IntPredicate::NE,
+                                BinOp::Lt => IntPredicate::SLT,
+                                BinOp::Le => IntPredicate::SLE,
+                                BinOp::Gt => IntPredicate::SGT,
+                                BinOp::Ge => IntPredicate::SGE,
+                                _ => unreachable!(),
+                            };
+                            let v = self.builder.build_int_compare(pred, l, r, "cmp").unwrap();
+                            Ok((v, Ty::Bool))
+                        }
+                        BinOp::And | BinOp::Or => unreachable!(),
+                    }
+                }
+            },
             ExprKind::Call { name, args } => {
                 let function = self.module.get_function(name).ok_or_else(|| {
                     Diagnostic::error(format!("未定義の関数: {}", name))
@@ -279,52 +418,81 @@ impl<'ctx> CodeGen<'ctx> {
                 }
                 let mut argvals: Vec<BasicMetadataValueEnum> = Vec::with_capacity(args.len());
                 for a in args {
-                    argvals.push(self.gen_expr(a)?.into());
+                    let (av, aty) = self.gen_expr(a)?;
+                    // 関数の引数は int のみ
+                    self.expect(Ty::Int, aty, a.span)?;
+                    argvals.push(av.into());
                 }
                 let call = self.builder.build_call(function, &argvals, "call").unwrap();
-                Ok(call.try_as_basic_value().unwrap_basic().into_int_value())
-            }
-            ExprKind::Binary { op, lhs, rhs } => {
-                let l = self.gen_expr(lhs)?;
-                let r = self.gen_expr(rhs)?;
-                let b = &self.builder;
-                let v = match op {
-                    BinOp::Add => b.build_int_add(l, r, "add").unwrap(),
-                    BinOp::Sub => b.build_int_sub(l, r, "sub").unwrap(),
-                    BinOp::Mul => b.build_int_mul(l, r, "mul").unwrap(),
-                    BinOp::Div => b.build_int_signed_div(l, r, "div").unwrap(),
-                    BinOp::Mod => b.build_int_signed_rem(l, r, "rem").unwrap(),
-                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                        let pred = match op {
-                            BinOp::Eq => IntPredicate::EQ,
-                            BinOp::Ne => IntPredicate::NE,
-                            BinOp::Lt => IntPredicate::SLT,
-                            BinOp::Le => IntPredicate::SLE,
-                            BinOp::Gt => IntPredicate::SGT,
-                            BinOp::Ge => IntPredicate::SGE,
-                            _ => unreachable!(),
-                        };
-                        let cmp = b.build_int_compare(pred, l, r, "cmp").unwrap();
-                        // i1 -> i64 にゼロ拡張して型を統一する
-                        b.build_int_z_extend(cmp, self.i64t(), "bool").unwrap()
-                    }
-                };
-                Ok(v)
+                let v = call.try_as_basic_value().unwrap_basic().into_int_value();
+                Ok((v, Ty::Int))
             }
         }
     }
 
-    /// "%lld\n" のグローバル文字列を必要時に1度だけ作り、ポインタを返す
-    fn fmt_ptr(&mut self) -> PointerValue<'ctx> {
-        if self.fmt.is_none() {
-            let g = self
-                .builder
-                .build_global_string_ptr("%lld\n", "fmt")
-                .unwrap()
-                .as_pointer_value();
-            self.fmt = Some(g);
+    /// 短絡評価する論理演算 `&&` / `||`。両辺は bool。
+    fn gen_logical(
+        &mut self,
+        op: BinOp,
+        lhs: &Expr,
+        rhs: &Expr,
+    ) -> Result<(IntValue<'ctx>, Ty), Diagnostic> {
+        let (l, lty) = self.gen_expr(lhs)?;
+        self.expect(Ty::Bool, lty, lhs.span)?;
+
+        let function = self.cur_function();
+        let entry_bb = self.builder.get_insert_block().unwrap();
+        let rhs_bb = self.ctx.append_basic_block(function, "logic.rhs");
+        let merge_bb = self.ctx.append_basic_block(function, "logic.merge");
+
+        // && は左が真のときだけ右を評価、|| は左が偽のときだけ右を評価
+        if matches!(op, BinOp::And) {
+            self.builder
+                .build_conditional_branch(l, rhs_bb, merge_bb)
+                .unwrap();
+        } else {
+            self.builder
+                .build_conditional_branch(l, merge_bb, rhs_bb)
+                .unwrap();
         }
-        self.fmt.unwrap()
+
+        // 右辺ブロック
+        self.builder.position_at_end(rhs_bb);
+        let (r, rty) = self.gen_expr(rhs)?;
+        self.expect(Ty::Bool, rty, rhs.span)?;
+        let rhs_end = self.builder.get_insert_block().unwrap();
+        self.builder.build_unconditional_branch(merge_bb).unwrap();
+
+        // 合流: phi で結果を選ぶ
+        self.builder.position_at_end(merge_bb);
+        let phi = self
+            .builder
+            .build_phi(self.ctx.bool_type(), "logic")
+            .unwrap();
+        // 短絡したときの値: && なら false、|| なら true
+        let short = self
+            .ctx
+            .bool_type()
+            .const_int(u64::from(matches!(op, BinOp::Or)), false);
+        phi.add_incoming(&[
+            (&short as &dyn BasicValue, entry_bb),
+            (&r as &dyn BasicValue, rhs_end),
+        ]);
+        Ok((phi.as_basic_value().into_int_value(), Ty::Bool))
+    }
+
+    /// グローバル文字列を名前でキャッシュしつつ作り、ポインタを返す
+    fn global_str(&mut self, text: &str, name: &'static str) -> PointerValue<'ctx> {
+        if let Some(p) = self.strings.get(name) {
+            return *p;
+        }
+        let g = self
+            .builder
+            .build_global_string_ptr(text, name)
+            .unwrap()
+            .as_pointer_value();
+        self.strings.insert(name, g);
+        g
     }
 
     pub fn ir_string(&self) -> String {
