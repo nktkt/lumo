@@ -84,6 +84,15 @@ pub enum StmtKind {
         cond: Expr,
         body: Vec<Stmt>,
     },
+    /// for (init; cond; step) { body }  — init/step は任意
+    For {
+        init: Option<Box<Stmt>>,
+        cond: Expr,
+        step: Option<Box<Stmt>>,
+        body: Vec<Stmt>,
+    },
+    Break,
+    Continue,
     ExprStmt(Expr),
 }
 

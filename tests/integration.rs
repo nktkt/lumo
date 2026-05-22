@@ -120,6 +120,11 @@ fn float_math() {
     run_ok("float");
 }
 
+#[test]
+fn loops() {
+    run_ok("loops");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -207,4 +212,9 @@ fn err_dup_param() {
 #[test]
 fn err_mix_types() {
     run_err("err_mix_types", "E0200");
+}
+
+#[test]
+fn err_break_outside() {
+    run_err("err_break_outside", "E0203");
 }

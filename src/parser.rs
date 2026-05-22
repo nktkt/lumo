@@ -210,6 +210,42 @@ impl Parser {
                 let body = self.parse_block()?;
                 StmtKind::While { cond, body }
             }
+            Tok::For => {
+                self.next();
+                self.eat(&Tok::LParen)?;
+                // for (init; cond; step) — init と step は省略可
+                let init = if self.peek() == &Tok::Semicolon {
+                    None
+                } else {
+                    Some(Box::new(self.parse_simple()?))
+                };
+                self.eat(&Tok::Semicolon)?;
+                let cond = self.parse_expr()?;
+                self.eat(&Tok::Semicolon)?;
+                let step = if self.peek() == &Tok::RParen {
+                    None
+                } else {
+                    Some(Box::new(self.parse_simple()?))
+                };
+                self.eat(&Tok::RParen)?;
+                let body = self.parse_block()?;
+                StmtKind::For {
+                    init,
+                    cond,
+                    step,
+                    body,
+                }
+            }
+            Tok::Break => {
+                self.next();
+                self.eat(&Tok::Semicolon)?;
+                StmtKind::Break
+            }
+            Tok::Continue => {
+                self.next();
+                self.eat(&Tok::Semicolon)?;
+                StmtKind::Continue
+            }
             // 識別子で始まり次が "=" なら代入文
             Tok::Ident(_) if self.peek2() == Some(&Tok::Assign) => {
                 let (name, _) = self.parse_ident()?;
@@ -224,6 +260,31 @@ impl Parser {
                 self.eat(&Tok::Semicolon)?;
                 StmtKind::ExprStmt(e)
             }
+        };
+        Ok(Stmt {
+            kind,
+            span: Span::new(start, self.last_end),
+        })
+    }
+
+    /// セミコロンを伴わない単純文（let / 代入 / 式）。for の init・step 用。
+    fn parse_simple(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.cur_span().start;
+        let kind = match self.peek() {
+            Tok::Let => {
+                self.next();
+                let (name, _) = self.parse_ident()?;
+                self.eat(&Tok::Assign)?;
+                let value = self.parse_expr()?;
+                StmtKind::Let { name, value }
+            }
+            Tok::Ident(_) if self.peek2() == Some(&Tok::Assign) => {
+                let (name, _) = self.parse_ident()?;
+                self.eat(&Tok::Assign)?;
+                let value = self.parse_expr()?;
+                StmtKind::Assign { name, value }
+            }
+            _ => StmtKind::ExprStmt(self.parse_expr()?),
         };
         Ok(Stmt {
             kind,
