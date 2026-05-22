@@ -1,0 +1,19 @@
+# Typed function signatures: bool now crosses function boundaries.
+fn is_even(n: int) -> bool {
+    return n % 2 == 0;
+}
+
+fn pick(c: bool, a: int, b: int) -> int {
+    if (c) {
+        return a;
+    }
+    return b;
+}
+
+fn main() {
+    print is_even(4);                  # true
+    print is_even(7);                  # false
+    print pick(is_even(10), 100, 200); # 100
+    print pick(false, 1, 2);           # 2
+    return 0;
+}

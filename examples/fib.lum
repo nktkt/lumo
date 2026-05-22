@@ -1,7 +1,7 @@
 # フィボナッチ数列を計算する Lumo プログラム
 # 再帰関数・if・while・print が動くことを確認できる
 
-fn fib(n) {
+fn fib(n: int) -> int {
     if (n < 2) {
         return n;
     }

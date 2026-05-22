@@ -8,6 +8,7 @@ use crate::ast::*;
 use crate::diagnostics::Diagnostic;
 use crate::lexer::{Tok, Token};
 use crate::span::Span;
+use crate::types::Type;
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
     let mut p = Parser {
@@ -92,8 +93,15 @@ impl Parser {
         let mut params = Vec::new();
         if self.peek() != &Tok::RParen {
             loop {
-                let (p, _) = self.parse_ident()?;
-                params.push(p);
+                // 引数は `名前: 型` という型注釈付き
+                let (pname, name_span) = self.parse_ident()?;
+                self.eat(&Tok::Colon)?;
+                let (pty, ty_span) = self.parse_type()?;
+                params.push(Param {
+                    name: pname,
+                    ty: pty,
+                    span: name_span.merge(ty_span),
+                });
                 if self.peek() == &Tok::Comma {
                     self.next();
                 } else {
@@ -102,13 +110,39 @@ impl Parser {
             }
         }
         self.eat(&Tok::RParen)?;
+        // 戻り値の型は `-> 型`。省略時は int。
+        let ret = if self.peek() == &Tok::Arrow {
+            self.next();
+            self.parse_type()?.0
+        } else {
+            Type::Int
+        };
         let body = self.parse_block()?;
         Ok(Function {
             name,
             params,
+            ret,
             body,
             span: Span::new(start, self.last_end),
         })
+    }
+
+    fn parse_type(&mut self) -> Result<(Type, Span), Diagnostic> {
+        let span = self.cur_span();
+        match self.next().kind {
+            Tok::Ident(name) => match name.as_str() {
+                "int" => Ok((Type::Int, span)),
+                "bool" => Ok((Type::Bool, span)),
+                _ => Err(Diagnostic::error(format!("不明な型: {}", name))
+                    .with_code("E0300")
+                    .at(span)),
+            },
+            other => Err(
+                Diagnostic::error(format!("型名を期待しましたが {:?} が来ました", other))
+                    .with_code("E0300")
+                    .at(span),
+            ),
+        }
     }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>, Diagnostic> {

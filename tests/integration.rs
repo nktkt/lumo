@@ -92,6 +92,11 @@ fn short_circuit() {
 }
 
 #[test]
+fn typed_fn() {
+    run_ok("typed_fn");
+}
+
+#[test]
 fn err_undefined_var() {
     run_err("err_undefined_var", "E0101");
 }
@@ -129,4 +134,19 @@ fn err_type_mismatch() {
 #[test]
 fn err_return_bool() {
     run_err("err_return_bool", "E0202");
+}
+
+#[test]
+fn err_arg_type() {
+    run_err("err_arg_type", "E0200");
+}
+
+#[test]
+fn err_unknown_type() {
+    run_err("err_unknown_type", "E0300");
+}
+
+#[test]
+fn err_dup_param() {
+    run_err("err_dup_param", "E0301");
 }

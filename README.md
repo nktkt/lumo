@@ -50,8 +50,10 @@ cargo run -- build examples/fib.lum
 - Logical: `&&`, `||` (short-circuit), `!` — operate on `bool`
 - Variables: `let x = expr;` and assignment `x = expr;` (assignment must keep the same type)
 - Control flow: `if (cond) { } else { }`, `while (cond) { }` — `cond` must be a `bool`
-- Functions: `fn name(args...) { ... return expr; }` — recursion and mutual recursion supported
-  - For now, function parameters and return values are `int` only (typed signatures arrive with the type system in Phase 3)
+- Functions with **typed signatures**: `fn name(p: int, q: bool) -> bool { ... }`
+  - Parameter types are required; the return type is optional and defaults to `int`
+  - `int` and `bool` may both be passed and returned; recursion and mutual recursion supported
+  - A dedicated type-checking pass (`src/typeck.rs`) runs before code generation
 - Built-in: `print expr;` (prints an `int` or `bool`, followed by a newline)
 - Comments: `# to end of line`
 - Entry point: `fn main()`
@@ -82,7 +84,10 @@ fn main() {
 | `src/lexer.rs`  | Tokenizer: source text into tokens |
 | `src/parser.rs` | Recursive-descent parser: tokens into an AST |
 | `src/ast.rs`    | AST node definitions |
-| `src/codegen.rs`| Lowers the AST to LLVM IR; JIT, object emission, IR printing |
+| `src/types.rs`  | The `Type` enum (`int` / `bool`) shared by typeck and codegen |
+| `src/typeck.rs` | Type-checking pass: name resolution + type rules, with diagnostics |
+| `src/codegen.rs`| Lowers the (type-checked) AST to LLVM IR; JIT, object emission, IR printing |
+| `src/diagnostics.rs` | Error rendering with source spans and carets |
 | `src/main.rs`   | CLI driver (`run` / `build` / `emit-ir`) |
 
 ## Roadmap

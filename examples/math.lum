@@ -1,6 +1,6 @@
 # 四則演算・関数・ループの確認用
 
-fn gcd(a, b) {
+fn gcd(a: int, b: int) -> int {
     while (b != 0) {
         let t = b;
         b = a % b;
@@ -9,7 +9,7 @@ fn gcd(a, b) {
     return a;
 }
 
-fn square(x) {
+fn square(x: int) -> int {
     return x * x;
 }
 
