@@ -20,6 +20,7 @@ use inkwell::values::{BasicMetadataValueEnum, FunctionValue, IntValue, PointerVa
 use inkwell::{AddressSpace, IntPredicate, OptimizationLevel};
 
 use crate::ast::*;
+use crate::diagnostics::Diagnostic;
 
 pub struct CodeGen<'ctx> {
     ctx: &'ctx Context,
@@ -46,12 +47,19 @@ impl<'ctx> CodeGen<'ctx> {
         self.ctx.i64_type()
     }
 
-    pub fn compile(&mut self, program: &Program) -> Result<(), String> {
+    pub fn compile(&mut self, program: &Program) -> Result<(), Diagnostic> {
         // 1) C の printf を宣言（print の実装に使う）
         self.declare_printf();
 
         // 2) すべての関数シグネチャを先に宣言する（前方参照・相互再帰のため）
         for f in program {
+            if self.module.get_function(&f.name).is_some() {
+                return Err(
+                    Diagnostic::error(format!("関数 {} が二重に定義されています", f.name))
+                        .with_code("E0103")
+                        .at(f.span),
+                );
+            }
             let i64t = self.i64t();
             let param_types: Vec<BasicMetadataTypeEnum> =
                 f.params.iter().map(|_| i64t.into()).collect();
@@ -65,12 +73,18 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         if self.module.get_function("main").is_none() {
-            return Err("エントリポイント `fn main()` が見つかりません".to_string());
+            return Err(
+                Diagnostic::error("エントリポイント `fn main()` が見つかりません")
+                    .with_code("E0100"),
+            );
         }
 
-        // 4) 生成したIRの整合性を検証する
+        // 4) 生成したIRの整合性を検証する（コンパイラ側のバグ検出用）
         if self.module.verify().is_err() {
-            return Err(format!("生成したLLVM IRが不正です:\n{}", self.ir_string()));
+            return Err(Diagnostic::error(format!(
+                "内部エラー: 生成したLLVM IRが不正です\n{}",
+                self.ir_string()
+            )));
         }
         Ok(())
     }
@@ -84,7 +98,7 @@ impl<'ctx> CodeGen<'ctx> {
             .add_function("printf", printf_ty, Some(Linkage::External));
     }
 
-    fn gen_function(&mut self, f: &Function) -> Result<(), String> {
+    fn gen_function(&mut self, f: &Function) -> Result<(), Diagnostic> {
         let function = self.module.get_function(&f.name).unwrap();
         let entry = self.ctx.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
@@ -120,9 +134,9 @@ impl<'ctx> CodeGen<'ctx> {
             .unwrap_or(false)
     }
 
-    fn gen_stmt(&mut self, stmt: &Stmt, function: FunctionValue<'ctx>) -> Result<(), String> {
-        match stmt {
-            Stmt::Let { name, value } => {
+    fn gen_stmt(&mut self, stmt: &Stmt, function: FunctionValue<'ctx>) -> Result<(), Diagnostic> {
+        match &stmt.kind {
+            StmtKind::Let { name, value } => {
                 let v = self.gen_expr(value)?;
                 let alloca = match self.vars.get(name) {
                     Some(p) => *p,
@@ -134,29 +148,32 @@ impl<'ctx> CodeGen<'ctx> {
                 };
                 self.builder.build_store(alloca, v).unwrap();
             }
-            Stmt::Assign { name, value } => {
+            StmtKind::Assign { name, value } => {
                 let v = self.gen_expr(value)?;
-                let ptr = *self
-                    .vars
-                    .get(name)
-                    .ok_or_else(|| format!("未定義の変数への代入: {}", name))?;
+                let ptr = *self.vars.get(name).ok_or_else(|| {
+                    Diagnostic::error(format!("未定義の変数への代入: {}", name))
+                        .with_code("E0101")
+                        .at(stmt.span)
+                })?;
                 self.builder.build_store(ptr, v).unwrap();
             }
-            Stmt::Print(e) => {
+            StmtKind::Print(e) => {
                 let v = self.gen_expr(e)?;
                 let fmt = self.fmt_ptr();
                 let printf = self.module.get_function("printf").unwrap();
                 let args: Vec<BasicMetadataValueEnum> = vec![fmt.into(), v.into()];
-                self.builder.build_call(printf, &args, "printf_call").unwrap();
+                self.builder
+                    .build_call(printf, &args, "printf_call")
+                    .unwrap();
             }
-            Stmt::Return(e) => {
+            StmtKind::Return(e) => {
                 let v = self.gen_expr(e)?;
                 self.builder.build_return(Some(&v)).unwrap();
             }
-            Stmt::ExprStmt(e) => {
+            StmtKind::ExprStmt(e) => {
                 self.gen_expr(e)?;
             }
-            Stmt::If {
+            StmtKind::If {
                 cond,
                 then_body,
                 else_body,
@@ -191,7 +208,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // 合流点
                 self.builder.position_at_end(merge_bb);
             }
-            Stmt::While { cond, body } => {
+            StmtKind::While { cond, body } => {
                 let cond_bb = self.ctx.append_basic_block(function, "while.cond");
                 let body_bb = self.ctx.append_basic_block(function, "while.body");
                 let end_bb = self.ctx.append_basic_block(function, "while.end");
@@ -219,7 +236,7 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// 条件式を評価し、i64 の結果を「0 でなければ真」として i1 に変換する
-    fn gen_cond(&mut self, e: &Expr) -> Result<IntValue<'ctx>, String> {
+    fn gen_cond(&mut self, e: &Expr) -> Result<IntValue<'ctx>, Diagnostic> {
         let v = self.gen_expr(e)?;
         let zero = self.i64t().const_int(0, false);
         Ok(self
@@ -228,33 +245,37 @@ impl<'ctx> CodeGen<'ctx> {
             .unwrap())
     }
 
-    fn gen_expr(&mut self, e: &Expr) -> Result<IntValue<'ctx>, String> {
-        match e {
-            Expr::Int(n) => Ok(self.i64t().const_int(*n as u64, true)),
-            Expr::Var(name) => {
-                let ptr = *self
-                    .vars
-                    .get(name)
-                    .ok_or_else(|| format!("未定義の変数: {}", name))?;
+    fn gen_expr(&mut self, e: &Expr) -> Result<IntValue<'ctx>, Diagnostic> {
+        match &e.kind {
+            ExprKind::Int(n) => Ok(self.i64t().const_int(*n as u64, true)),
+            ExprKind::Var(name) => {
+                let ptr = *self.vars.get(name).ok_or_else(|| {
+                    Diagnostic::error(format!("未定義の変数: {}", name))
+                        .with_code("E0101")
+                        .at(e.span)
+                })?;
                 Ok(self
                     .builder
                     .build_load(self.i64t(), ptr, name)
                     .unwrap()
                     .into_int_value())
             }
-            Expr::Call { name, args } => {
-                let function = self
-                    .module
-                    .get_function(name)
-                    .ok_or_else(|| format!("未定義の関数: {}", name))?;
+            ExprKind::Call { name, args } => {
+                let function = self.module.get_function(name).ok_or_else(|| {
+                    Diagnostic::error(format!("未定義の関数: {}", name))
+                        .with_code("E0102")
+                        .at(e.span)
+                })?;
                 let expected = function.count_params() as usize;
                 if expected != args.len() {
-                    return Err(format!(
+                    return Err(Diagnostic::error(format!(
                         "関数 {} は引数 {} 個ですが {} 個渡されました",
                         name,
                         expected,
                         args.len()
-                    ));
+                    ))
+                    .with_code("E0104")
+                    .at(e.span));
                 }
                 let mut argvals: Vec<BasicMetadataValueEnum> = Vec::with_capacity(args.len());
                 for a in args {
@@ -263,7 +284,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let call = self.builder.build_call(function, &argvals, "call").unwrap();
                 Ok(call.try_as_basic_value().unwrap_basic().into_int_value())
             }
-            Expr::Binary { op, lhs, rhs } => {
+            ExprKind::Binary { op, lhs, rhs } => {
                 let l = self.gen_expr(lhs)?;
                 let r = self.gen_expr(rhs)?;
                 let b = &self.builder;
