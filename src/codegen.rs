@@ -33,8 +33,9 @@ pub struct CodeGen<'ctx> {
     ctx: &'ctx Context,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
-    /// 現在の関数内の変数名 -> (スタック上のアドレス, 型)
-    vars: HashMap<String, (PointerValue<'ctx>, Type)>,
+    /// レキシカルスコープのスタック。各層が 変数名 -> (alloca, 型)。
+    /// typeck と同じ入れ子規則で push/pop し、参照は内→外で解決する。
+    scopes: Vec<HashMap<String, (PointerValue<'ctx>, Type)>>,
     /// 関数名 -> 戻り値の型（呼び出し式の型を知るため）
     fn_rets: HashMap<String, Type>,
     /// 生成済みのグローバル文字列（書式・"true"/"false" など）をキャッシュ
@@ -49,11 +50,36 @@ impl<'ctx> CodeGen<'ctx> {
             ctx,
             module: ctx.create_module(name),
             builder: ctx.create_builder(),
-            vars: HashMap::new(),
+            scopes: Vec::new(),
             fn_rets: HashMap::new(),
             strings: HashMap::new(),
             loop_stack: Vec::new(),
         }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    /// 最内スコープに変数を束縛する（外側を隠すシャドーイングを許す）。
+    fn declare_var(&mut self, name: &str, ptr: PointerValue<'ctx>, ty: Type) {
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .insert(name.to_string(), (ptr, ty));
+    }
+
+    /// 内側のスコープから順に変数を探す。
+    fn lookup_var(&self, name: &str) -> (PointerValue<'ctx>, Type) {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|s| s.get(name).copied())
+            .expect("typeck guarantees the variable exists")
     }
 
     /// Lumo の型に対応する LLVM の基本型 (int=i64, bool=i1, float=f64, string=ptr)
@@ -126,7 +152,8 @@ impl<'ctx> CodeGen<'ctx> {
         let entry = self.ctx.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
 
-        self.vars.clear();
+        // 関数スコープ（引数とトップレベルのローカル）を1層だけ用意する
+        self.scopes = vec![HashMap::new()];
 
         // 仮引数をスタックにコピーして、ローカル変数として扱えるようにする
         for (i, p) in f.params.iter().enumerate() {
@@ -136,7 +163,7 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_alloca(self.basic_ty(p.ty), &p.name)
                 .unwrap();
             self.builder.build_store(alloca, param).unwrap();
-            self.vars.insert(p.name.clone(), (alloca, p.ty));
+            self.declare_var(&p.name, alloca, p.ty);
         }
 
         self.gen_block(&f.body, function);
@@ -180,14 +207,14 @@ impl<'ctx> CodeGen<'ctx> {
         match &stmt.kind {
             StmtKind::Let { name, value } => {
                 let (v, ty) = self.gen_expr(value);
-                // 同名の再 let は新しい alloca で上書きする（型が変わってもよい）
+                // 新しい alloca を最内スコープに束縛する（シャドーイング対応）
                 let alloca = self.builder.build_alloca(self.basic_ty(ty), name).unwrap();
-                self.vars.insert(name.clone(), (alloca, ty));
+                self.declare_var(name, alloca, ty);
                 self.builder.build_store(alloca, v).unwrap();
             }
             StmtKind::Assign { name, value } => {
                 let (v, _) = self.gen_expr(value);
-                let (ptr, _) = self.vars[name];
+                let (ptr, _) = self.lookup_var(name);
                 self.builder.build_store(ptr, v).unwrap();
             }
             StmtKind::Print(e) => {
@@ -251,14 +278,18 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // then 節
                 self.builder.position_at_end(then_bb);
+                self.push_scope();
                 self.gen_block(then_body, function);
+                self.pop_scope();
                 if self.block_open() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
 
                 // else 節
                 self.builder.position_at_end(else_bb);
+                self.push_scope();
                 self.gen_block(else_body, function);
+                self.pop_scope();
                 if self.block_open() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
@@ -282,7 +313,9 @@ impl<'ctx> CodeGen<'ctx> {
                 // continue は条件へ、break は末尾へ
                 self.builder.position_at_end(body_bb);
                 self.loop_stack.push((cond_bb, end_bb));
+                self.push_scope();
                 self.gen_block(body, function);
+                self.pop_scope();
                 self.loop_stack.pop();
                 if self.block_open() {
                     self.builder.build_unconditional_branch(cond_bb).unwrap();
@@ -296,6 +329,8 @@ impl<'ctx> CodeGen<'ctx> {
                 step,
                 body,
             } => {
+                // for 自体のスコープ（init の変数は cond/body/step から見える）
+                self.push_scope();
                 if let Some(init) = init {
                     self.gen_stmt(init, function);
                 }
@@ -315,7 +350,9 @@ impl<'ctx> CodeGen<'ctx> {
                 // continue は step へ、break は末尾へ
                 self.builder.position_at_end(body_bb);
                 self.loop_stack.push((step_bb, end_bb));
+                self.push_scope();
                 self.gen_block(body, function);
+                self.pop_scope();
                 self.loop_stack.pop();
                 if self.block_open() {
                     self.builder.build_unconditional_branch(step_bb).unwrap();
@@ -328,6 +365,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_unconditional_branch(cond_bb).unwrap();
 
                 self.builder.position_at_end(end_bb);
+                self.pop_scope(); // for 自体のスコープ
             }
             StmtKind::Break => {
                 let (_, brk) = *self.loop_stack.last().unwrap();
@@ -362,7 +400,7 @@ impl<'ctx> CodeGen<'ctx> {
                 (g.into(), Type::Str)
             }
             ExprKind::Var(name) => {
-                let (ptr, ty) = self.vars[name];
+                let (ptr, ty) = self.lookup_var(name);
                 let v = self
                     .builder
                     .build_load(self.basic_ty(ty), ptr, name)

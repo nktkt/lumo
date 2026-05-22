@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.9.0]
+
+### Added
+
+- Lexical block scoping: variables are scoped to their enclosing `{ }` block, and an inner `let` may shadow an outer one. A `for`'s init variable is scoped to the loop.
+- `docs/rfcs/0001-memory-model.md`: a design RFC for the future heap/memory strategy (strings, arrays).
+
+### Changed
+
+- Using a variable outside its block is now an error (`E0101`) — previously such variables leaked to the whole function.
+
 ## [0.8.0]
 
 ### Added

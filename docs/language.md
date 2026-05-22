@@ -93,6 +93,25 @@ n = n + 1;   # ok: int = int
 # n = 2.0;   # error: cannot assign float to an int variable
 ```
 
+### Scope
+
+Variables are **lexically block-scoped**: a `let` is visible only until the end
+of the enclosing `{ ... }` block (the body of a function, `if`/`else`, `while`,
+or `for`). A `for`'s init variable is scoped to the loop. Using a name outside
+its block is an error.
+
+A `let` may **shadow** a variable from an outer scope; the outer binding is
+restored when the inner block ends:
+
+```lumo
+let x = 1;
+if (true) {
+    let x = 2;   # a new variable that shadows the outer x
+    print x;     # 2
+}
+print x;         # 1
+```
+
 ## Operators
 
 ### Arithmetic: `+ - * /`
