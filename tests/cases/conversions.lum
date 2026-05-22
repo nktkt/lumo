@@ -1,0 +1,9 @@
+# int() and float() conversion built-ins
+fn main() {
+    print float(7) / float(2);   # 3.5  (float division)
+    print int(3.9);              # 3    (truncates toward zero)
+    print int(3.2) + 1;          # 4
+    let x = 10;
+    print float(x) * 1.5;        # 15
+    return 0;
+}

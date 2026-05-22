@@ -45,7 +45,8 @@ Lumo has four primitive types:
 
 There are **no implicit conversions** between types. An `int` is never
 automatically turned into a `float`, a `bool` is never treated as a number, and
-so on. Every operation requires operands of the expected type.
+so on. Every operation requires operands of the expected type. To convert
+between numbers explicitly, use the [`int()` / `float()` built-ins](#conversions).
 
 `string` values are immutable literals: you can store them in variables, pass
 them to functions, return them, and `print` them, but there are **no string
@@ -235,14 +236,34 @@ exit code.
 
 ### `print`
 
-Prints an `int`, `bool`, or `float`, followed by a newline. Booleans print as
-`true` or `false`.
+Prints an `int`, `bool`, `float`, or `string`, followed by a newline. Booleans
+print as `true` or `false`.
 
 ```lumo
 print 42;       # 42
 print true;     # true
 print 3.14;     # 3.14
+print "hi";     # hi
 ```
+
+### Conversions
+
+`int(x)` and `float(x)` convert between the two numeric types — the only way to
+mix `int` and `float`, since there are no implicit conversions.
+
+- `float(i)` widens an `int` to a `float`.
+- `int(f)` truncates a `float` toward zero to an `int`.
+- Each accepts a numeric argument; `int(int)` and `float(float)` are no-ops.
+
+```lumo
+let total = 7;
+let count = 2;
+print float(total) / float(count);  # 3.5  (float division)
+print int(3.9);                     # 3    (truncates)
+```
+
+`int`, `float`, `bool`, and `string` are reserved names — you cannot define a
+function with one of them.
 
 ## Diagnostics
 

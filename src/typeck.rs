@@ -21,6 +21,14 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
     // 1) 全関数のシグネチャを集める（前方参照・相互再帰のため）
     let mut sigs: HashMap<String, Sig> = HashMap::new();
     for f in program {
+        if is_reserved_name(&f.name) {
+            return Err(Diagnostic::error(format!(
+                "{} は型名・組み込み関数なので関数名に使えません",
+                f.name
+            ))
+            .with_code("E0302")
+            .at(f.span));
+        }
         if sigs.contains_key(&f.name) {
             return Err(
                 Diagnostic::error(format!("関数 {} が二重に定義されています", f.name))
@@ -251,6 +259,34 @@ impl FnChecker<'_> {
                 }
             }
             ExprKind::Call { name, args } => {
+                // 組み込み変換 int()/float()
+                if name == "int" || name == "float" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は引数1個ですが {} 個渡されました",
+                            name,
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let at = self.check_expr(&args[0])?;
+                    if !at.is_numeric() {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は数値(int または float)を変換しますが {} が渡されました",
+                            name,
+                            at.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    return Ok(if name == "int" {
+                        Type::Int
+                    } else {
+                        Type::Float
+                    });
+                }
+
                 let (param_types, ret) = {
                     let sig = self.sigs.get(name).ok_or_else(|| {
                         Diagnostic::error(format!("未定義の関数: {}", name))
@@ -291,6 +327,11 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
         .with_code("E0200")
         .at(span))
     }
+}
+
+/// 型名・組み込み関数名として予約されている識別子か（関数名に使えない）。
+fn is_reserved_name(name: &str) -> bool {
+    matches!(name, "int" | "float" | "bool" | "string")
 }
 
 fn numeric_required(got: Type, span: Span) -> Diagnostic {

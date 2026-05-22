@@ -1,0 +1,20 @@
+# Numeric conversions (Phase 8 / v0.8)
+#
+# int and float never mix implicitly. Use the built-ins `int(x)` and `float(x)`
+# to convert: `int(float)` truncates toward zero, `float(int)` widens.
+
+fn average(n: int) -> float {
+    let sum = 0;
+    for (let i = 1; i <= n; i = i + 1) {
+        sum = sum + i;
+    }
+    # convert so the division is float division, not integer division
+    return float(sum) / float(n);
+}
+
+fn main() {
+    print average(5);     # 3   (15 / 5)
+    print average(4);     # 2.5 (10 / 4)
+    print int(average(4)); # 2  (truncated back to int)
+    return 0;
+}

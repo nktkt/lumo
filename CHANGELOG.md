@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.8.0]
+
+### Added
+
+- `int(x)` and `float(x)` conversion built-ins (`float(int)` widens, `int(float)` truncates toward zero) — the way to mix `int` and `float`.
+- `examples/README.md` cataloging the example programs.
+- `E0302`: `int`/`float`/`bool`/`string` are reserved and cannot be used as function names.
+
 ## [0.7.0]
 
 ### Added

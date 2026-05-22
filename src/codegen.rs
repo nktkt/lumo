@@ -403,6 +403,40 @@ impl<'ctx> CodeGen<'ctx> {
                     self.gen_arith_or_cmp(*op, l, r, lty)
                 }
             },
+            ExprKind::Call { name, args } if name == "int" => {
+                // float -> int は切り捨て、int -> int は恒等
+                let (v, ty) = self.gen_expr(&args[0]);
+                if ty == Type::Float {
+                    let i = self
+                        .builder
+                        .build_float_to_signed_int(
+                            v.into_float_value(),
+                            self.ctx.i64_type(),
+                            "toint",
+                        )
+                        .unwrap();
+                    (i.into(), Type::Int)
+                } else {
+                    (v, Type::Int)
+                }
+            }
+            ExprKind::Call { name, args } if name == "float" => {
+                // int -> float、float -> float は恒等
+                let (v, ty) = self.gen_expr(&args[0]);
+                if ty == Type::Int {
+                    let f = self
+                        .builder
+                        .build_signed_int_to_float(
+                            v.into_int_value(),
+                            self.ctx.f64_type(),
+                            "tofloat",
+                        )
+                        .unwrap();
+                    (f.into(), Type::Float)
+                } else {
+                    (v, Type::Float)
+                }
+            }
             ExprKind::Call { name, args } => {
                 let function = self.module.get_function(name).unwrap();
                 let mut argvals: Vec<BasicMetadataValueEnum> = Vec::with_capacity(args.len());
