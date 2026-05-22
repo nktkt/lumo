@@ -41,6 +41,7 @@ pub enum ExprKind {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Str(String),
     Var(String),
     Unary {
         op: UnOp,

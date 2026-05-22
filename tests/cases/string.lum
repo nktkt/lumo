@@ -1,0 +1,17 @@
+# string literals: print, store, pass, return, escapes
+fn label(n: int) -> string {
+    if (n % 2 == 0) {
+        return "even";
+    }
+    return "odd";
+}
+
+fn main() {
+    print "Hello, world!";
+    print "two\nlines";       # escape: newline
+    let s = "stored";
+    print s;
+    print label(3);           # odd
+    print label(4);           # even
+    return 0;
+}

@@ -54,12 +54,14 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.6, in progress)
+## Language (v0.7, in progress)
 
-See **[docs/language.md](docs/language.md)** for the full reference. In brief:
+See **[docs/language.md](docs/language.md)** for the full reference, or
+**[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
 
-- Three value types: `int` (64-bit), `bool`, `float` (64-bit) — no implicit conversions
-- Literals: `42`, `true` / `false`, `3.14`
+- Four value types: `int` (64-bit), `bool`, `float` (64-bit), `string` — no implicit conversions
+- Literals: `42`, `true` / `false`, `3.14`, `"text"` (with `\n` `\t` `\\` `\"` escapes)
+- Strings are immutable literals (store / pass / return / print); no concatenation or comparison yet
 - Arithmetic: `+ - * /` on two ints or two floats, `%` (int only), unary minus `-x`
 - Comparison: `== != < <= > >=` (yields a `bool`)
 - Logical: `&&`, `||` (short-circuit), `!` — operate on `bool`
@@ -107,8 +109,10 @@ fn main() {
 
 ## Documentation
 
+- **[docs/tutorial.md](docs/tutorial.md)** — a getting-started tutorial (start here)
 - **[docs/language.md](docs/language.md)** — the language reference (for users)
 - **[docs/internals.md](docs/internals.md)** — compiler architecture (for contributors)
+- **[CHANGELOG.md](CHANGELOG.md)** — release history
 - **[ROADMAP.md](ROADMAP.md)** — the long-range plan
 
 ## Roadmap

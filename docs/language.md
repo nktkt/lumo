@@ -36,26 +36,36 @@ code `0` (the value returned by `main`).
 
 ## Types
 
-Lumo has three primitive types:
+Lumo has four primitive types:
 
 - `int` — 64-bit signed integer
 - `bool` — either `true` or `false`
 - `float` — 64-bit IEEE double
+- `string` — an immutable text value
 
 There are **no implicit conversions** between types. An `int` is never
 automatically turned into a `float`, a `bool` is never treated as a number, and
 so on. Every operation requires operands of the expected type.
 
+`string` values are immutable literals: you can store them in variables, pass
+them to functions, return them, and `print` them, but there are **no string
+operators yet** — no concatenation and no comparison. (Those arrive with the
+heap/memory model in a later release.)
+
 ## Literals
 
-| Type    | Examples            |
-| ------- | ------------------- |
-| `int`   | `42`, `0`           |
-| `float` | `3.14`, `0.5`, `2.0`|
-| `bool`  | `true`, `false`     |
+| Type     | Examples                 |
+| -------- | ------------------------ |
+| `int`    | `42`, `0`                |
+| `float`  | `3.14`, `0.5`, `2.0`     |
+| `bool`   | `true`, `false`          |
+| `string` | `"hi"`, `"line\n"`, `""` |
 
 Float literals must have digits on **both** sides of the dot. `1.` and `.5` are
 not valid; write `1.0` and `0.5` instead.
+
+String literals are enclosed in double quotes and support the escapes `\n`,
+`\t`, `\r`, `\\`, `\"`, and `\0`. A string literal may not span multiple lines.
 
 Comments start with `#` and run to the end of the line:
 
@@ -266,7 +276,7 @@ program     = { function } ;
 function    = "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params      = param { "," param } ;
 param       = ident ":" type ;
-type        = "int" | "bool" | "float" ;
+type        = "int" | "bool" | "float" | "string" ;
 
 block       = "{" { statement } "}" ;
 
@@ -306,6 +316,7 @@ unary       = ( "-" | "!" ) unary | primary ;
 primary     = int_lit
             | float_lit
             | bool_lit
+            | str_lit
             | ident
             | call
             | "(" expr ")" ;
@@ -315,5 +326,6 @@ args        = expr { "," expr } ;
 int_lit     = digit { digit } ;
 float_lit   = digit { digit } "." digit { digit } ;
 bool_lit    = "true" | "false" ;
+str_lit     = '"' { char | escape } '"' ;
 ident       = letter { letter | digit | "_" } ;
 ```

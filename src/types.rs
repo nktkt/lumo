@@ -5,6 +5,8 @@ pub enum Type {
     Int,
     Bool,
     Float,
+    /// イミュータブルな文字列（グローバル定数へのポインタ）。連結・比較は未対応。
+    Str,
 }
 
 impl Type {
@@ -13,6 +15,7 @@ impl Type {
             Type::Int => "int",
             Type::Bool => "bool",
             Type::Float => "float",
+            Type::Str => "string",
         }
     }
 
