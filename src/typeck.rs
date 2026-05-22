@@ -55,12 +55,14 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
     for f in program {
         let mut checker = FnChecker {
             sigs: &sigs,
-            vars: HashMap::new(),
+            // 関数スコープ（引数とトップレベルのローカル）を最初の層にする
+            scopes: vec![HashMap::new()],
             ret: f.ret,
             loops: 0,
         };
         for p in &f.params {
-            if checker.vars.insert(p.name.clone(), p.ty).is_some() {
+            // 同じスコープ内での重複だけをエラーにする
+            if checker.scopes[0].insert(p.name.clone(), p.ty).is_some() {
                 return Err(
                     Diagnostic::error(format!("引数 {} が重複しています", p.name))
                         .with_code("E0301")
@@ -77,23 +79,51 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
 
 struct FnChecker<'a> {
     sigs: &'a HashMap<String, Sig>,
-    vars: HashMap<String, Type>,
+    /// レキシカルスコープのスタック（内側が末尾）。`let` は最内へ、参照は内→外で探索。
+    scopes: Vec<HashMap<String, Type>>,
     ret: Type,
     /// 入れ子になっているループの深さ（break/continue の検査用）
     loops: u32,
 }
 
 impl FnChecker<'_> {
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    /// 最内スコープに変数を宣言する（外側を隠すシャドーイングを許す）。
+    fn declare(&mut self, name: &str, ty: Type) {
+        self.scopes.last_mut().unwrap().insert(name.to_string(), ty);
+    }
+
+    /// 内側のスコープから順に変数を探す。
+    fn lookup(&self, name: &str) -> Option<Type> {
+        self.scopes.iter().rev().find_map(|s| s.get(name).copied())
+    }
+
+    /// 文の並びを新しいスコープで検査する。
+    fn check_block(&mut self, stmts: &[Stmt]) -> Result<(), Diagnostic> {
+        self.push_scope();
+        for s in stmts {
+            self.check_stmt(s)?;
+        }
+        self.pop_scope();
+        Ok(())
+    }
     fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), Diagnostic> {
         match &stmt.kind {
             StmtKind::Let { name, value } => {
                 let t = self.check_expr(value)?;
-                // 同名の再 let は型が変わってもよい（新しい束縛で上書き）
-                self.vars.insert(name.clone(), t);
+                // 最内スコープに束縛（外側の同名変数はシャドーイング）
+                self.declare(name, t);
             }
             StmtKind::Assign { name, value } => {
                 let t = self.check_expr(value)?;
-                let var_ty = *self.vars.get(name).ok_or_else(|| {
+                let var_ty = self.lookup(name).ok_or_else(|| {
                     Diagnostic::error(format!("未定義の変数への代入: {}", name))
                         .with_code("E0101")
                         .at(stmt.span)
@@ -133,19 +163,13 @@ impl FnChecker<'_> {
                 else_body,
             } => {
                 self.check_cond(cond)?;
-                for s in then_body {
-                    self.check_stmt(s)?;
-                }
-                for s in else_body {
-                    self.check_stmt(s)?;
-                }
+                self.check_block(then_body)?;
+                self.check_block(else_body)?;
             }
             StmtKind::While { cond, body } => {
                 self.check_cond(cond)?;
                 self.loops += 1;
-                for s in body {
-                    self.check_stmt(s)?;
-                }
+                self.check_block(body)?;
                 self.loops -= 1;
             }
             StmtKind::For {
@@ -154,18 +178,19 @@ impl FnChecker<'_> {
                 step,
                 body,
             } => {
+                // for 自体のスコープ（init の変数は cond/body/step から見える）
+                self.push_scope();
                 if let Some(init) = init {
                     self.check_stmt(init)?;
                 }
                 self.check_cond(cond)?;
                 self.loops += 1;
-                for s in body {
-                    self.check_stmt(s)?;
-                }
+                self.check_block(body)?;
                 self.loops -= 1;
                 if let Some(step) = step {
                     self.check_stmt(step)?;
                 }
+                self.pop_scope();
             }
             StmtKind::Break => {
                 if self.loops == 0 {
@@ -204,7 +229,7 @@ impl FnChecker<'_> {
             ExprKind::Float(_) => Ok(Type::Float),
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::Str(_) => Ok(Type::Str),
-            ExprKind::Var(name) => self.vars.get(name).copied().ok_or_else(|| {
+            ExprKind::Var(name) => self.lookup(name).ok_or_else(|| {
                 Diagnostic::error(format!("未定義の変数: {}", name))
                     .with_code("E0101")
                     .at(e.span)

@@ -1,0 +1,16 @@
+# lexical block scoping and shadowing
+fn main() {
+    let x = 1;
+    if (true) {
+        let x = 2;       # shadows the outer x within this block
+        print x;         # 2
+    }
+    print x;             # 1  (outer binding restored)
+
+    let i = 0;
+    for (let i = 10; i < 13; i = i + 1) {
+        print i;         # 10 11 12  (loop variable shadows outer i)
+    }
+    print i;             # 0  (outer i untouched by the loop)
+    return 0;
+}

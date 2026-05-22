@@ -135,6 +135,11 @@ fn conversions() {
     run_ok("conversions");
 }
 
+#[test]
+fn scope() {
+    run_ok("scope");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -247,4 +252,9 @@ fn err_conv_type() {
 #[test]
 fn err_reserved_name() {
     run_err("err_reserved_name", "E0302");
+}
+
+#[test]
+fn err_out_of_scope() {
+    run_err("err_out_of_scope", "E0101");
 }

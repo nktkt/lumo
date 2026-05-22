@@ -54,7 +54,7 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.8, in progress)
+## Language (v0.9, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
@@ -63,6 +63,7 @@ See **[docs/language.md](docs/language.md)** for the full reference, or
 - Literals: `42`, `true` / `false`, `3.14`, `"text"` (with `\n` `\t` `\\` `\"` escapes)
 - Strings are immutable literals (store / pass / return / print); no concatenation or comparison yet
 - Numeric conversions via the `int(x)` / `float(x)` built-ins
+- Variables are lexically block-scoped, with shadowing
 - Arithmetic: `+ - * /` on two ints or two floats, `%` (int only), unary minus `-x`
 - Comparison: `== != < <= > >=` (yields a `bool`)
 - Logical: `&&`, `||` (short-circuit), `!` — operate on `bool`
@@ -115,6 +116,7 @@ fn main() {
 - **[docs/internals.md](docs/internals.md)** — compiler architecture (for contributors)
 - **[CHANGELOG.md](CHANGELOG.md)** — release history
 - **[ROADMAP.md](ROADMAP.md)** — the long-range plan
+- **[docs/rfcs/](docs/rfcs/)** — design RFCs (e.g. the memory-model proposal)
 
 ## Roadmap
 

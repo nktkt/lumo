@@ -1,0 +1,7 @@
+fn main() {
+    if (true) {
+        let secret = 42;
+    }
+    print secret;
+    return 0;
+}
