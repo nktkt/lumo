@@ -2,6 +2,7 @@
 //! 各ノードはソース位置 (Span) を持ち、診断メッセージで該当箇所を指せる。
 
 use crate::span::Span;
+use crate::types::Type;
 
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
@@ -86,9 +87,18 @@ pub enum StmtKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct Param {
+    pub name: String,
+    pub ty: Type,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
-    pub params: Vec<String>,
+    pub params: Vec<Param>,
+    /// 戻り値の型（構文で省略時は int）
+    pub ret: Type,
     pub body: Vec<Stmt>,
     pub span: Span,
 }

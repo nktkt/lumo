@@ -26,6 +26,7 @@ pub enum Tok {
     RBrace,    // }
     Comma,     // ,
     Semicolon, // ;
+    Colon,     // :
     // 演算子
     Assign, // =
     Plus,
@@ -42,6 +43,7 @@ pub enum Tok {
     Bang,     // !
     AmpAmp,   // &&
     PipePipe, // ||
+    Arrow,    // ->
     Eof,
 }
 
@@ -136,6 +138,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                 ('>', '=') => Some(Tok::Ge),
                 ('&', '&') => Some(Tok::AmpAmp),
                 ('|', '|') => Some(Tok::PipePipe),
+                ('-', '>') => Some(Tok::Arrow),
                 _ => None,
             };
             if let Some(kind) = kind {
@@ -154,6 +157,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             '}' => Tok::RBrace,
             ',' => Tok::Comma,
             ';' => Tok::Semicolon,
+            ':' => Tok::Colon,
             '=' => Tok::Assign,
             '+' => Tok::Plus,
             '-' => Tok::Minus,

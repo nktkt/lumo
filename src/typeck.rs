@@ -1,0 +1,239 @@
+//! 型検査 (Type Checking): パース後・コード生成前に走る独立したパス。
+//!
+//! 名前解決（変数・関数）と型の整合性をまとめて検査し、位置付きの診断を出す。
+//! ここを通過したプログラムは「型が正しい」とみなせるので、codegen は
+//! 型エラーを気にせず純粋な低レベル化に専念できる。
+
+use std::collections::HashMap;
+
+use crate::ast::*;
+use crate::diagnostics::Diagnostic;
+use crate::span::Span;
+use crate::types::Type;
+
+/// 関数シグネチャ（引数の型と戻り値の型）
+struct Sig {
+    params: Vec<Type>,
+    ret: Type,
+}
+
+pub fn check(program: &Program) -> Result<(), Diagnostic> {
+    // 1) 全関数のシグネチャを集める（前方参照・相互再帰のため）
+    let mut sigs: HashMap<String, Sig> = HashMap::new();
+    for f in program {
+        if sigs.contains_key(&f.name) {
+            return Err(
+                Diagnostic::error(format!("関数 {} が二重に定義されています", f.name))
+                    .with_code("E0103")
+                    .at(f.span),
+            );
+        }
+        sigs.insert(
+            f.name.clone(),
+            Sig {
+                params: f.params.iter().map(|p| p.ty).collect(),
+                ret: f.ret,
+            },
+        );
+    }
+
+    if !sigs.contains_key("main") {
+        return Err(
+            Diagnostic::error("エントリポイント `fn main()` が見つかりません").with_code("E0100"),
+        );
+    }
+
+    // 2) 各関数の本体を検査
+    for f in program {
+        let mut checker = FnChecker {
+            sigs: &sigs,
+            vars: HashMap::new(),
+            ret: f.ret,
+        };
+        for p in &f.params {
+            if checker.vars.insert(p.name.clone(), p.ty).is_some() {
+                return Err(
+                    Diagnostic::error(format!("引数 {} が重複しています", p.name))
+                        .with_code("E0301")
+                        .at(p.span),
+                );
+            }
+        }
+        for stmt in &f.body {
+            checker.check_stmt(stmt)?;
+        }
+    }
+    Ok(())
+}
+
+struct FnChecker<'a> {
+    sigs: &'a HashMap<String, Sig>,
+    vars: HashMap<String, Type>,
+    ret: Type,
+}
+
+impl FnChecker<'_> {
+    fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), Diagnostic> {
+        match &stmt.kind {
+            StmtKind::Let { name, value } => {
+                let t = self.check_expr(value)?;
+                // 同名の再 let は型が変わってもよい（新しい束縛で上書き）
+                self.vars.insert(name.clone(), t);
+            }
+            StmtKind::Assign { name, value } => {
+                let t = self.check_expr(value)?;
+                let var_ty = *self.vars.get(name).ok_or_else(|| {
+                    Diagnostic::error(format!("未定義の変数への代入: {}", name))
+                        .with_code("E0101")
+                        .at(stmt.span)
+                })?;
+                if t != var_ty {
+                    return Err(Diagnostic::error(format!(
+                        "変数 {} は {} 型ですが {} 型を代入しようとしました",
+                        name,
+                        var_ty.name(),
+                        t.name()
+                    ))
+                    .with_code("E0200")
+                    .at(stmt.span));
+                }
+            }
+            StmtKind::Print(e) => {
+                self.check_expr(e)?;
+            }
+            StmtKind::Return(e) => {
+                let t = self.check_expr(e)?;
+                if t != self.ret {
+                    return Err(Diagnostic::error(format!(
+                        "関数は {} を返しますが {} を返そうとしています",
+                        self.ret.name(),
+                        t.name()
+                    ))
+                    .with_code("E0202")
+                    .at(e.span));
+                }
+            }
+            StmtKind::ExprStmt(e) => {
+                self.check_expr(e)?;
+            }
+            StmtKind::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.check_cond(cond)?;
+                for s in then_body {
+                    self.check_stmt(s)?;
+                }
+                for s in else_body {
+                    self.check_stmt(s)?;
+                }
+            }
+            StmtKind::While { cond, body } => {
+                self.check_cond(cond)?;
+                for s in body {
+                    self.check_stmt(s)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check_cond(&mut self, e: &Expr) -> Result<(), Diagnostic> {
+        let t = self.check_expr(e)?;
+        if t != Type::Bool {
+            return Err(Diagnostic::error(format!(
+                "条件は bool である必要がありますが {} が使われています",
+                t.name()
+            ))
+            .with_code("E0201")
+            .at(e.span));
+        }
+        Ok(())
+    }
+
+    fn check_expr(&mut self, e: &Expr) -> Result<Type, Diagnostic> {
+        match &e.kind {
+            ExprKind::Int(_) => Ok(Type::Int),
+            ExprKind::Bool(_) => Ok(Type::Bool),
+            ExprKind::Var(name) => self.vars.get(name).copied().ok_or_else(|| {
+                Diagnostic::error(format!("未定義の変数: {}", name))
+                    .with_code("E0101")
+                    .at(e.span)
+            }),
+            ExprKind::Unary { op, expr } => {
+                let t = self.check_expr(expr)?;
+                match op {
+                    UnOp::Neg => {
+                        expect(Type::Int, t, expr.span)?;
+                        Ok(Type::Int)
+                    }
+                    UnOp::Not => {
+                        expect(Type::Bool, t, expr.span)?;
+                        Ok(Type::Bool)
+                    }
+                }
+            }
+            ExprKind::Binary { op, lhs, rhs } => {
+                let lt = self.check_expr(lhs)?;
+                let rt = self.check_expr(rhs)?;
+                match op {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                        expect(Type::Int, lt, lhs.span)?;
+                        expect(Type::Int, rt, rhs.span)?;
+                        Ok(Type::Int)
+                    }
+                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                        expect(Type::Int, lt, lhs.span)?;
+                        expect(Type::Int, rt, rhs.span)?;
+                        Ok(Type::Bool)
+                    }
+                    BinOp::And | BinOp::Or => {
+                        expect(Type::Bool, lt, lhs.span)?;
+                        expect(Type::Bool, rt, rhs.span)?;
+                        Ok(Type::Bool)
+                    }
+                }
+            }
+            ExprKind::Call { name, args } => {
+                let (param_types, ret) = {
+                    let sig = self.sigs.get(name).ok_or_else(|| {
+                        Diagnostic::error(format!("未定義の関数: {}", name))
+                            .with_code("E0102")
+                            .at(e.span)
+                    })?;
+                    (sig.params.clone(), sig.ret)
+                };
+                if param_types.len() != args.len() {
+                    return Err(Diagnostic::error(format!(
+                        "関数 {} は引数 {} 個ですが {} 個渡されました",
+                        name,
+                        param_types.len(),
+                        args.len()
+                    ))
+                    .with_code("E0104")
+                    .at(e.span));
+                }
+                for (arg, &pty) in args.iter().zip(param_types.iter()) {
+                    let at = self.check_expr(arg)?;
+                    expect(pty, at, arg.span)?;
+                }
+                Ok(ret)
+            }
+        }
+    }
+}
+
+fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
+    if want == got {
+        Ok(())
+    } else {
+        Err(Diagnostic::error(format!(
+            "型が合いません: {} が必要ですが {} が渡されました",
+            want.name(),
+            got.name()
+        ))
+        .with_code("E0200")
+        .at(span))
+    }
+}

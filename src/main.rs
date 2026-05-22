@@ -10,6 +10,8 @@ mod diagnostics;
 mod lexer;
 mod parser;
 mod span;
+mod typeck;
+mod types;
 
 use diagnostics::Diagnostic;
 use std::process::exit;
@@ -43,6 +45,7 @@ fn main() {
     let compiled: Result<(), Diagnostic> = (|| {
         let tokens = lexer::lex(&src)?;
         let program = parser::parse(tokens)?;
+        typeck::check(&program)?;
         cg.compile(&program)
     })();
 

@@ -1,0 +1,7 @@
+fn f(x: float) -> int {
+    return 0;
+}
+
+fn main() {
+    return f(1);
+}
