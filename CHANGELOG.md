@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.11.0]
+
+### Added
+
+- Arrays: types `[int]`/`[bool]`/`[float]`/`[string]`, literals `[a, b, c]`, indexing `a[i]` (read and write), and `len(a)`. Heap-allocated via the runtime; scalar element types only (no nested arrays).
+- `len(s)` also returns the length of a `string`.
+- Assignment now targets an lvalue (a variable or an array element).
+
+### Notes
+
+- No array bounds checking yet (out-of-range indexing is undefined behavior); memory is reclaimed at program exit. See `docs/rfcs/0001-memory-model.md`.
+
 ## [0.10.0]
 
 ### Added

@@ -82,13 +82,14 @@ impl<'ctx> CodeGen<'ctx> {
             .expect("typeck guarantees the variable exists")
     }
 
-    /// Lumo の型に対応する LLVM の基本型 (int=i64, bool=i1, float=f64, string=ptr)
+    /// Lumo の型に対応する LLVM の基本型。
+    /// int=i64, bool=i1, float=f64, string/array=ポインタ。
     fn basic_ty(&self, ty: Type) -> BasicTypeEnum<'ctx> {
         match ty {
             Type::Int => self.ctx.i64_type().into(),
             Type::Bool => self.ctx.bool_type().into(),
             Type::Float => self.ctx.f64_type().into(),
-            Type::Str => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Str | Type::Array(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
         }
     }
 
@@ -98,7 +99,7 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().const_int(0, false).into(),
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::Float => self.ctx.f64_type().const_float(0.0).into(),
-            Type::Str => self
+            Type::Str | Type::Array(_) => self
                 .ctx
                 .ptr_type(AddressSpace::default())
                 .const_null()
@@ -247,10 +248,20 @@ impl<'ctx> CodeGen<'ctx> {
                 self.declare_var(name, alloca, ty);
                 self.builder.build_store(alloca, v).unwrap();
             }
-            StmtKind::Assign { name, value } => {
+            StmtKind::Assign { target, value } => {
                 let (v, _) = self.gen_expr(value);
-                let (ptr, _) = self.lookup_var(name);
-                self.builder.build_store(ptr, v).unwrap();
+                match &target.kind {
+                    ExprKind::Var(name) => {
+                        let (ptr, _) = self.lookup_var(name);
+                        self.builder.build_store(ptr, v).unwrap();
+                    }
+                    ExprKind::Index { array, index } => {
+                        let (arr, _) = self.gen_expr(array);
+                        let addr = self.elem_addr(arr.into_pointer_value(), index);
+                        self.builder.build_store(addr, v).unwrap();
+                    }
+                    _ => unreachable!("typeck restricts assignment targets"),
+                }
             }
             StmtKind::Print(e) => {
                 let (v, ty) = self.gen_expr(e);
@@ -287,6 +298,7 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_call(printf, &[fmt.into(), s.into()], "printf_call")
                             .unwrap();
                     }
+                    Type::Array(_) => unreachable!("typeck forbids printing arrays"),
                 }
             }
             StmtKind::Return(e) => {
@@ -510,6 +522,30 @@ impl<'ctx> CodeGen<'ctx> {
                     (v, Type::Float)
                 }
             }
+            ExprKind::Call { name, args } if name == "len" => {
+                // string は strlen、配列は先頭ヘッダの i64 を読む
+                let (v, ty) = self.gen_expr(&args[0]);
+                let ptr = v.into_pointer_value();
+                match ty {
+                    Type::Str => {
+                        let strlen = self.module.get_function("strlen").unwrap();
+                        let n = self
+                            .builder
+                            .build_call(strlen, &[ptr.into()], "len")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic();
+                        (n, Type::Int)
+                    }
+                    _ => {
+                        let n = self
+                            .builder
+                            .build_load(self.ctx.i64_type(), ptr, "len")
+                            .unwrap();
+                        (n, Type::Int)
+                    }
+                }
+            }
             ExprKind::Call { name, args } => {
                 let function = self.module.get_function(name).unwrap();
                 let mut argvals: Vec<BasicMetadataValueEnum> = Vec::with_capacity(args.len());
@@ -520,6 +556,53 @@ impl<'ctx> CodeGen<'ctx> {
                 let call = self.builder.build_call(function, &argvals, "call").unwrap();
                 let v = call.try_as_basic_value().unwrap_basic();
                 (v, self.fn_rets[name])
+            }
+            ExprKind::Array(elems) => {
+                // ヒープに [長さ i64][8byteスロット×N] を確保する
+                let i64t = self.ctx.i64_type();
+                let n = elems.len() as u64;
+                let size = i64t.const_int(8 * (n + 1), false);
+                let alloc = self.module.get_function("lumo_alloc").unwrap();
+                let buf = self
+                    .builder
+                    .build_call(alloc, &[size.into()], "arr")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+                // 先頭に長さを格納
+                self.builder
+                    .build_store(buf, i64t.const_int(n, false))
+                    .unwrap();
+                // 各要素を 8 + 8*i バイト目へ
+                let mut elem_type = Type::Int;
+                for (i, el) in elems.iter().enumerate() {
+                    let (val, ty) = self.gen_expr(el);
+                    if i == 0 {
+                        elem_type = ty;
+                    }
+                    let off = i64t.const_int(8 + 8 * (i as u64), false);
+                    let addr = unsafe {
+                        self.builder
+                            .build_in_bounds_gep(self.ctx.i8_type(), buf, &[off], "slot")
+                            .unwrap()
+                    };
+                    self.builder.build_store(addr, val).unwrap();
+                }
+                (buf.into(), Type::Array(elem_type.as_elem().unwrap()))
+            }
+            ExprKind::Index { array, index } => {
+                let (arr, arr_ty) = self.gen_expr(array);
+                let elem = match arr_ty {
+                    Type::Array(e) => e,
+                    _ => unreachable!("typeck guarantees an array here"),
+                };
+                let addr = self.elem_addr(arr.into_pointer_value(), index);
+                let v = self
+                    .builder
+                    .build_load(self.basic_ty(elem.to_type()), addr, "idx")
+                    .unwrap();
+                (v, elem.to_type())
             }
         }
     }
@@ -668,6 +751,21 @@ impl<'ctx> CodeGen<'ctx> {
                 (res.into(), Type::Bool)
             }
             _ => unreachable!(),
+        }
+    }
+
+    /// 配列の i 番目スロットのアドレスを計算する。
+    /// レイアウトは [長さ i64][8byte スロット×N] なので、要素は 8 + 8*i バイト目。
+    fn elem_addr(&mut self, base: PointerValue<'ctx>, index: &Expr) -> PointerValue<'ctx> {
+        let (idx, _) = self.gen_expr(index);
+        let idx = idx.into_int_value();
+        let eight = self.ctx.i64_type().const_int(8, false);
+        let scaled = self.builder.build_int_mul(idx, eight, "off.mul").unwrap();
+        let off = self.builder.build_int_add(scaled, eight, "off").unwrap();
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(self.ctx.i8_type(), base, &[off], "slot")
+                .unwrap()
         }
     }
 

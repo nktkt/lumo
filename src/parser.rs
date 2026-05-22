@@ -31,10 +31,6 @@ impl Parser {
         &self.toks[self.pos].kind
     }
 
-    fn peek2(&self) -> Option<&Tok> {
-        self.toks.get(self.pos + 1).map(|t| &t.kind)
-    }
-
     fn cur_span(&self) -> Span {
         self.toks[self.pos].span
     }
@@ -139,6 +135,20 @@ impl Parser {
                     .with_code("E0300")
                     .at(span)),
             },
+            // 配列型 [T]（T はスカラ。入れ子の配列は不可）
+            Tok::LBracket => {
+                let (elem_ty, elem_span) = self.parse_type()?;
+                self.eat(&Tok::RBracket)?;
+                let full = Span::new(span.start, self.last_end);
+                let elem = elem_ty.as_elem().ok_or_else(|| {
+                    Diagnostic::error(
+                        "配列の要素にできるのは int/bool/float/string です（配列の配列は不可）",
+                    )
+                    .with_code("E0300")
+                    .at(elem_span)
+                })?;
+                Ok((Type::Array(elem), full))
+            }
             other => Err(
                 Diagnostic::error(format!("型名を期待しましたが {:?} が来ました", other))
                     .with_code("E0300")
@@ -247,19 +257,18 @@ impl Parser {
                 self.eat(&Tok::Semicolon)?;
                 StmtKind::Continue
             }
-            // 識別子で始まり次が "=" なら代入文
-            Tok::Ident(_) if self.peek2() == Some(&Tok::Assign) => {
-                let (name, _) = self.parse_ident()?;
-                self.eat(&Tok::Assign)?;
-                let value = self.parse_expr()?;
-                self.eat(&Tok::Semicolon)?;
-                StmtKind::Assign { name, value }
-            }
-            // それ以外は式文（関数呼び出しなど）
+            // 式から始まる文: `左辺値 = 式;`（代入）か、式文
             _ => {
                 let e = self.parse_expr()?;
+                let k = if self.peek() == &Tok::Assign {
+                    self.next();
+                    let value = self.parse_expr()?;
+                    StmtKind::Assign { target: e, value }
+                } else {
+                    StmtKind::ExprStmt(e)
+                };
                 self.eat(&Tok::Semicolon)?;
-                StmtKind::ExprStmt(e)
+                k
             }
         };
         Ok(Stmt {
@@ -279,13 +288,16 @@ impl Parser {
                 let value = self.parse_expr()?;
                 StmtKind::Let { name, value }
             }
-            Tok::Ident(_) if self.peek2() == Some(&Tok::Assign) => {
-                let (name, _) = self.parse_ident()?;
-                self.eat(&Tok::Assign)?;
-                let value = self.parse_expr()?;
-                StmtKind::Assign { name, value }
+            _ => {
+                let e = self.parse_expr()?;
+                if self.peek() == &Tok::Assign {
+                    self.next();
+                    let value = self.parse_expr()?;
+                    StmtKind::Assign { target: e, value }
+                } else {
+                    StmtKind::ExprStmt(e)
+                }
             }
-            _ => StmtKind::ExprStmt(self.parse_expr()?),
         };
         Ok(Stmt {
             kind,
@@ -386,7 +398,26 @@ impl Parser {
                 span,
             });
         }
-        self.parse_primary()
+        self.parse_postfix()
+    }
+
+    /// 一次式に後置の添字 `[index]` を（連鎖して）付ける。
+    fn parse_postfix(&mut self) -> Result<Expr, Diagnostic> {
+        let mut e = self.parse_primary()?;
+        while self.peek() == &Tok::LBracket {
+            self.next();
+            let index = self.parse_expr()?;
+            self.eat(&Tok::RBracket)?;
+            let span = Span::new(e.span.start, self.last_end);
+            e = Expr {
+                kind: ExprKind::Index {
+                    array: Box::new(e),
+                    index: Box::new(index),
+                },
+                span,
+            };
+        }
+        Ok(e)
     }
 
     fn parse_primary(&mut self) -> Result<Expr, Diagnostic> {
@@ -416,6 +447,25 @@ impl Parser {
                 let e = self.parse_expr()?;
                 self.eat(&Tok::RParen)?;
                 Ok(e)
+            }
+            Tok::LBracket => {
+                // 配列リテラル [e1, e2, ...]
+                let mut elems = Vec::new();
+                if self.peek() != &Tok::RBracket {
+                    loop {
+                        elems.push(self.parse_expr()?);
+                        if self.peek() == &Tok::Comma {
+                            self.next();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.eat(&Tok::RBracket)?;
+                Ok(Expr {
+                    kind: ExprKind::Array(elems),
+                    span: Span::new(span.start, self.last_end),
+                })
             }
             Tok::Ident(name) => {
                 if self.peek() == &Tok::LParen {

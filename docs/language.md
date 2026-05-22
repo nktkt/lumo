@@ -36,12 +36,14 @@ code `0` (the value returned by `main`).
 
 ## Types
 
-Lumo has four primitive types:
+Lumo has four primitive types and one compound type:
 
 - `int` — 64-bit signed integer
 - `bool` — either `true` or `false`
 - `float` — 64-bit IEEE double
 - `string` — an immutable text value
+- `[T]` — an array of `T`, where `T` is `int`, `bool`, `float`, or `string`
+  (see [Arrays](#arrays))
 
 There are **no implicit conversions** between types. An `int` is never
 automatically turned into a `float`, a `bool` is never treated as a number, and
@@ -237,7 +239,8 @@ fn name(p: int, q: bool) -> float {
 - Every parameter must declare its type.
 - The return type is optional and defaults to `int`. So `fn main() { ... }`
   returns an `int`.
-- `int`, `bool`, and `float` may all be used as parameter and return types.
+- `int`, `bool`, `float`, `string`, and arrays may all be used as parameter and
+  return types.
 - `return expr;` returns a value, whose type must match the declared return
   type.
 - Recursion and mutual recursion are supported.
@@ -253,6 +256,36 @@ fn odd(n: int) -> bool {
     return even(n - 1);
 }
 ```
+
+## Arrays
+
+An array type is written `[T]` where `T` is a scalar (`int`, `bool`, `float`, or
+`string`). Arrays of arrays are not supported yet.
+
+- **Literal:** `[e1, e2, ...]` — at least one element, all the same type. The
+  element type is inferred. (There is no empty-array literal yet.)
+- **Index:** `a[i]` reads, `a[i] = v;` writes. The index is an `int`.
+- **Length:** `len(a)` returns the number of elements as an `int`.
+
+```lumo
+let xs = [10, 20, 30];
+xs[1] = 99;
+print xs[1];        # 99
+print len(xs);      # 3
+
+fn sum(ns: [int]) -> int {
+    let total = 0;
+    for (let i = 0; i < len(ns); i = i + 1) {
+        total = total + ns[i];
+    }
+    return total;
+}
+```
+
+Arrays are heap-allocated (laid out as a length followed by the elements) and,
+like concatenated strings, are currently reclaimed only at program exit — see
+[RFC 0001](rfcs/0001-memory-model.md). **There is no bounds checking yet**:
+indexing out of range is undefined behavior.
 
 Execution starts at `fn main()`. The value `main` returns becomes the process
 exit code.
@@ -287,8 +320,18 @@ print float(total) / float(count);  # 3.5  (float division)
 print int(3.9);                     # 3    (truncates)
 ```
 
-`int`, `float`, `bool`, and `string` are reserved names — you cannot define a
-function with one of them.
+`int`, `float`, `bool`, `string`, and `len` are reserved names — you cannot
+define a function with one of them.
+
+### `len`
+
+`len(x)` returns, as an `int`, the length of a `string` (its number of bytes) or
+an array (its number of elements).
+
+```lumo
+print len("hello");     # 5
+print len([1, 2, 3]);   # 3
+```
 
 ## Diagnostics
 
@@ -322,7 +365,7 @@ program     = { function } ;
 function    = "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params      = param { "," param } ;
 param       = ident ":" type ;
-type        = "int" | "bool" | "float" | "string" ;
+type        = "int" | "bool" | "float" | "string" | "[" type "]" ;
 
 block       = "{" { statement } "}" ;
 
@@ -338,7 +381,7 @@ statement   = let_stmt
             | expr_stmt ;
 
 let_stmt    = "let" ident "=" expr ";" ;
-assign_stmt = ident "=" expr ";" ;
+assign_stmt = lvalue "=" expr ";" ;   (* lvalue is a variable or array index *)
 return_stmt = "return" expr ";" ;
 print_stmt  = "print" expr ";" ;
 if_stmt     = "if" "(" expr ")" block [ "else" block ] ;
@@ -358,11 +401,14 @@ and_expr    = cmp_expr { "&&" cmp_expr } ;
 cmp_expr    = add_expr { ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) add_expr } ;
 add_expr    = mul_expr { ( "+" | "-" ) mul_expr } ;
 mul_expr    = unary    { ( "*" | "/" | "%" ) unary } ;
-unary       = ( "-" | "!" ) unary | primary ;
+unary       = ( "-" | "!" ) unary | postfix ;
+postfix     = primary { "[" expr "]" } ;   (* array indexing *)
+array_lit   = "[" [ expr { "," expr } ] "]" ;
 primary     = int_lit
             | float_lit
             | bool_lit
             | str_lit
+            | array_lit
             | ident
             | call
             | "(" expr ")" ;

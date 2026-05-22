@@ -1,0 +1,36 @@
+# Arrays (Phase 11 / v0.11)
+#
+# Array types are written `[int]`, `[float]`, `[bool]`, `[string]` (elements are
+# scalars). Literals are `[a, b, c]`; index with `a[i]` (read or write); `len(a)`
+# gives the length. Arrays are heap-allocated (reclaimed at exit for now).
+
+fn max(xs: [int]) -> int {
+    let best = xs[0];
+    for (let i = 1; i < len(xs); i = i + 1) {
+        if (xs[i] > best) {
+            best = xs[i];
+        }
+    }
+    return best;
+}
+
+# in-place bubble sort, then print the sorted values
+fn main() {
+    let xs = [5, 2, 8, 1, 9, 3];
+    print max(xs);                # 9
+
+    let n = len(xs);
+    for (let i = 0; i < n; i = i + 1) {
+        for (let j = 0; j < n - 1 - i; j = j + 1) {
+            if (xs[j] > xs[j + 1]) {
+                let tmp = xs[j];
+                xs[j] = xs[j + 1];
+                xs[j + 1] = tmp;
+            }
+        }
+    }
+    for (let i = 0; i < n; i = i + 1) {
+        print xs[i];              # 1 2 3 5 8 9
+    }
+    return 0;
+}
