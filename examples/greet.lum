@@ -1,0 +1,23 @@
+# Heap strings (Phase 10 / v0.10) — concatenation and equality.
+#
+# `+` joins strings (allocating a new heap string via the runtime's lumo_alloc),
+# and `==` / `!=` compare them by value. Memory is reclaimed at program exit for
+# now; see docs/rfcs/0001-memory-model.md for the planned arena/region scheme.
+
+fn full_name(first: string, last: string) -> string {
+    return first + " " + last;
+}
+
+fn main() {
+    let name = full_name("Ada", "Lovelace");
+    print name;                       # Ada Lovelace
+    print "Hello, " + name + "!";     # Hello, Ada Lovelace!
+
+    let pw = "swordfish";
+    if (pw == "swordfish") {
+        print "access granted";
+    } else {
+        print "denied";
+    }
+    return 0;
+}

@@ -1,0 +1,15 @@
+# heap strings: concatenation (+) and equality (== / !=)
+fn greet(name: string) -> string {
+    return "Hi, " + name;
+}
+
+fn main() {
+    print greet("Lumo");        # Hi, Lumo
+    let a = "foo";
+    let b = "bar";
+    print a + b;                # foobar
+    print a + b == "foobar";    # true  (+ binds tighter than ==)
+    print a == b;               # false
+    print a != b;               # true
+    return 0;
+}

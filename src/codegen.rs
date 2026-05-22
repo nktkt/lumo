@@ -107,8 +107,8 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     pub fn compile(&mut self, program: &Program) -> Result<(), Diagnostic> {
-        // 1) C の printf を宣言（print の実装に使う）
-        self.declare_printf();
+        // 1) ランタイム（printf と、文字列ヒープ用の libc 関数・lumo_alloc）を用意する
+        self.declare_runtime();
 
         // 2) すべての関数シグネチャを先に宣言する（前方参照・相互再帰のため）。
         //    typeck が重複や main の存在を確認済みなのでここでは検査しない。
@@ -138,13 +138,48 @@ impl<'ctx> CodeGen<'ctx> {
         Ok(())
     }
 
-    fn declare_printf(&self) {
+    fn declare_runtime(&self) {
         let i32t = self.ctx.i32_type();
-        let i8ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i64t = self.ctx.i64_type();
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+
         // int printf(char*, ...) — 可変長引数なので最後の引数を true にする
-        let printf_ty = i32t.fn_type(&[i8ptr.into()], true);
+        let printf_ty = i32t.fn_type(&[ptr.into()], true);
         self.module
             .add_function("printf", printf_ty, Some(Linkage::External));
+
+        // 文字列ヒープ操作に使う libc 関数
+        let ext = Some(Linkage::External);
+        self.module
+            .add_function("malloc", ptr.fn_type(&[i64t.into()], false), ext);
+        self.module
+            .add_function("strlen", i64t.fn_type(&[ptr.into()], false), ext);
+        self.module
+            .add_function("strcpy", ptr.fn_type(&[ptr.into(), ptr.into()], false), ext);
+        self.module
+            .add_function("strcat", ptr.fn_type(&[ptr.into(), ptr.into()], false), ext);
+        self.module.add_function(
+            "strcmp",
+            i32t.fn_type(&[ptr.into(), ptr.into()], false),
+            ext,
+        );
+
+        // ヒープ確保のチョークポイント。今は malloc を呼ぶだけ（回収なし）。
+        // 将来ここを arena/region アロケータに差し替える（RFC 0001）。
+        let alloc =
+            self.module
+                .add_function("lumo_alloc", ptr.fn_type(&[i64t.into()], false), None);
+        let bb = self.ctx.append_basic_block(alloc, "entry");
+        self.builder.position_at_end(bb);
+        let size = alloc.get_nth_param(0).unwrap();
+        let malloc = self.module.get_function("malloc").unwrap();
+        let mem = self
+            .builder
+            .build_call(malloc, &[size.into()], "mem")
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_basic();
+        self.builder.build_return(Some(&mem)).unwrap();
     }
 
     fn gen_function(&mut self, f: &Function) {
@@ -497,6 +532,9 @@ impl<'ctx> CodeGen<'ctx> {
         r: BasicValueEnum<'ctx>,
         ty: Type,
     ) -> (BasicValueEnum<'ctx>, Type) {
+        if ty == Type::Str {
+            return self.gen_str_binop(op, l, r);
+        }
         let b = &self.builder;
         if ty == Type::Float {
             let l = l.into_float_value();
@@ -555,6 +593,81 @@ impl<'ctx> CodeGen<'ctx> {
                 }
                 BinOp::And | BinOp::Or => unreachable!(),
             }
+        }
+    }
+
+    /// 文字列の二項演算: `+`(連結) と `==`/`!=`(等価)。typeck がこの3つに限定済み。
+    fn gen_str_binop(
+        &self,
+        op: BinOp,
+        l: BasicValueEnum<'ctx>,
+        r: BasicValueEnum<'ctx>,
+    ) -> (BasicValueEnum<'ctx>, Type) {
+        let a = l.into_pointer_value();
+        let b = r.into_pointer_value();
+        let strlen = self.module.get_function("strlen").unwrap();
+        match op {
+            BinOp::Add => {
+                // 連結: lumo_alloc(len(a)+len(b)+1) して strcpy + strcat
+                let la = self
+                    .builder
+                    .build_call(strlen, &[a.into()], "la")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_int_value();
+                let lb = self
+                    .builder
+                    .build_call(strlen, &[b.into()], "lb")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_int_value();
+                let one = self.ctx.i64_type().const_int(1, false);
+                let sum = self.builder.build_int_add(la, lb, "lab").unwrap();
+                let size = self.builder.build_int_add(sum, one, "size").unwrap();
+
+                let alloc = self.module.get_function("lumo_alloc").unwrap();
+                let buf = self
+                    .builder
+                    .build_call(alloc, &[size.into()], "buf")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+
+                let strcpy = self.module.get_function("strcpy").unwrap();
+                self.builder
+                    .build_call(strcpy, &[buf.into(), a.into()], "cpy")
+                    .unwrap();
+                let strcat = self.module.get_function("strcat").unwrap();
+                self.builder
+                    .build_call(strcat, &[buf.into(), b.into()], "cat")
+                    .unwrap();
+                (buf.into(), Type::Str)
+            }
+            BinOp::Eq | BinOp::Ne => {
+                let strcmp = self.module.get_function("strcmp").unwrap();
+                let cmp = self
+                    .builder
+                    .build_call(strcmp, &[a.into(), b.into()], "scmp")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_int_value();
+                let zero = self.ctx.i32_type().const_int(0, false);
+                let pred = if matches!(op, BinOp::Eq) {
+                    IntPredicate::EQ
+                } else {
+                    IntPredicate::NE
+                };
+                let res = self
+                    .builder
+                    .build_int_compare(pred, cmp, zero, "streq")
+                    .unwrap();
+                (res.into(), Type::Bool)
+            }
+            _ => unreachable!(),
         }
     }
 

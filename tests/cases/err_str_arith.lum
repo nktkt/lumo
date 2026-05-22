@@ -1,4 +1,4 @@
 fn main() {
-    print "a" + "b";
+    print "a" - "b";
     return 0;
 }
