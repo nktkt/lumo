@@ -1,53 +1,82 @@
 //! 構文解析 (Parser): トークン列を再帰下降でASTに変換する。
+//! 各ノードにソース位置 (Span) を付け、構文エラーは Diagnostic で位置付きで返す。
 //!
 //! 演算子の優先順位（低い→高い）:
 //!   比較 (== != < <= > >=) < 加減 (+ -) < 乗除 (* / %) < 単項 (-) < 一次式
 
 use crate::ast::*;
-use crate::lexer::Tok;
+use crate::diagnostics::Diagnostic;
+use crate::lexer::{Tok, Token};
+use crate::span::Span;
 
-pub fn parse(tokens: Vec<Tok>) -> Result<Program, String> {
-    let mut p = Parser { toks: tokens, pos: 0 };
+pub fn parse(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
+    let mut p = Parser {
+        toks: tokens,
+        pos: 0,
+        last_end: 0,
+    };
     p.parse_program()
 }
 
 struct Parser {
-    toks: Vec<Tok>,
+    toks: Vec<Token>,
     pos: usize,
+    /// 直前に消費したトークンの終了オフセット（ノードの span 終端に使う）
+    last_end: usize,
 }
 
 impl Parser {
     fn peek(&self) -> &Tok {
-        &self.toks[self.pos]
+        &self.toks[self.pos].kind
     }
 
     fn peek2(&self) -> Option<&Tok> {
-        self.toks.get(self.pos + 1)
+        self.toks.get(self.pos + 1).map(|t| &t.kind)
     }
 
-    fn next(&mut self) -> Tok {
+    fn cur_span(&self) -> Span {
+        self.toks[self.pos].span
+    }
+
+    fn next(&mut self) -> Token {
         let t = self.toks[self.pos].clone();
+        self.last_end = t.span.end;
         self.pos += 1;
         t
     }
 
-    fn eat(&mut self, t: &Tok) -> Result<(), String> {
-        if self.peek() == t {
-            self.pos += 1;
-            Ok(())
+    fn err(&self, msg: impl Into<String>) -> Diagnostic {
+        Diagnostic::error(msg)
+            .with_code("E0002")
+            .at(self.cur_span())
+    }
+
+    fn eat(&mut self, want: &Tok) -> Result<Token, Diagnostic> {
+        if self.peek() == want {
+            Ok(self.next())
         } else {
-            Err(format!("{:?} を期待しましたが {:?} が来ました", t, self.peek()))
+            Err(self.err(format!(
+                "{:?} を期待しましたが {:?} が来ました",
+                want,
+                self.peek()
+            )))
         }
     }
 
-    fn parse_ident(&mut self) -> Result<String, String> {
-        match self.next() {
-            Tok::Ident(s) => Ok(s),
-            other => Err(format!("識別子を期待しましたが {:?} が来ました", other)),
+    fn parse_ident(&mut self) -> Result<(String, Span), Diagnostic> {
+        let span = self.cur_span();
+        match self.next().kind {
+            Tok::Ident(s) => Ok((s, span)),
+            other => Err(Diagnostic::error(format!(
+                "識別子を期待しましたが {:?} が来ました",
+                other
+            ))
+            .with_code("E0002")
+            .at(span)),
         }
     }
 
-    fn parse_program(&mut self) -> Result<Program, String> {
+    fn parse_program(&mut self) -> Result<Program, Diagnostic> {
         let mut funcs = Vec::new();
         while self.peek() != &Tok::Eof {
             funcs.push(self.parse_function()?);
@@ -55,14 +84,16 @@ impl Parser {
         Ok(funcs)
     }
 
-    fn parse_function(&mut self) -> Result<Function, String> {
+    fn parse_function(&mut self) -> Result<Function, Diagnostic> {
+        let start = self.cur_span().start;
         self.eat(&Tok::Fn)?;
-        let name = self.parse_ident()?;
+        let (name, _) = self.parse_ident()?;
         self.eat(&Tok::LParen)?;
         let mut params = Vec::new();
         if self.peek() != &Tok::RParen {
             loop {
-                params.push(self.parse_ident()?);
+                let (p, _) = self.parse_ident()?;
+                params.push(p);
                 if self.peek() == &Tok::Comma {
                     self.next();
                 } else {
@@ -72,10 +103,15 @@ impl Parser {
         }
         self.eat(&Tok::RParen)?;
         let body = self.parse_block()?;
-        Ok(Function { name, params, body })
+        Ok(Function {
+            name,
+            params,
+            body,
+            span: Span::new(start, self.last_end),
+        })
     }
 
-    fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
         self.eat(&Tok::LBrace)?;
         let mut stmts = Vec::new();
         while self.peek() != &Tok::RBrace && self.peek() != &Tok::Eof {
@@ -85,27 +121,28 @@ impl Parser {
         Ok(stmts)
     }
 
-    fn parse_stmt(&mut self) -> Result<Stmt, String> {
-        match self.peek() {
+    fn parse_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.cur_span().start;
+        let kind = match self.peek() {
             Tok::Let => {
                 self.next();
-                let name = self.parse_ident()?;
+                let (name, _) = self.parse_ident()?;
                 self.eat(&Tok::Assign)?;
                 let value = self.parse_expr()?;
                 self.eat(&Tok::Semicolon)?;
-                Ok(Stmt::Let { name, value })
+                StmtKind::Let { name, value }
             }
             Tok::Return => {
                 self.next();
                 let value = self.parse_expr()?;
                 self.eat(&Tok::Semicolon)?;
-                Ok(Stmt::Return(value))
+                StmtKind::Return(value)
             }
             Tok::Print => {
                 self.next();
                 let value = self.parse_expr()?;
                 self.eat(&Tok::Semicolon)?;
-                Ok(Stmt::Print(value))
+                StmtKind::Print(value)
             }
             Tok::If => {
                 self.next();
@@ -124,11 +161,11 @@ impl Parser {
                 } else {
                     Vec::new()
                 };
-                Ok(Stmt::If {
+                StmtKind::If {
                     cond,
                     then_body,
                     else_body,
-                })
+                }
             }
             Tok::While => {
                 self.next();
@@ -136,30 +173,34 @@ impl Parser {
                 let cond = self.parse_expr()?;
                 self.eat(&Tok::RParen)?;
                 let body = self.parse_block()?;
-                Ok(Stmt::While { cond, body })
+                StmtKind::While { cond, body }
             }
             // 識別子で始まり次が "=" なら代入文
             Tok::Ident(_) if self.peek2() == Some(&Tok::Assign) => {
-                let name = self.parse_ident()?;
+                let (name, _) = self.parse_ident()?;
                 self.eat(&Tok::Assign)?;
                 let value = self.parse_expr()?;
                 self.eat(&Tok::Semicolon)?;
-                Ok(Stmt::Assign { name, value })
+                StmtKind::Assign { name, value }
             }
             // それ以外は式文（関数呼び出しなど）
             _ => {
                 let e = self.parse_expr()?;
                 self.eat(&Tok::Semicolon)?;
-                Ok(Stmt::ExprStmt(e))
+                StmtKind::ExprStmt(e)
             }
-        }
+        };
+        Ok(Stmt {
+            kind,
+            span: Span::new(start, self.last_end),
+        })
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, String> {
+    fn parse_expr(&mut self) -> Result<Expr, Diagnostic> {
         self.parse_comparison()
     }
 
-    fn parse_comparison(&mut self) -> Result<Expr, String> {
+    fn parse_comparison(&mut self) -> Result<Expr, Diagnostic> {
         let mut lhs = self.parse_additive()?;
         loop {
             let op = match self.peek() {
@@ -173,16 +214,12 @@ impl Parser {
             };
             self.next();
             let rhs = self.parse_additive()?;
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
+            lhs = binary(op, lhs, rhs);
         }
         Ok(lhs)
     }
 
-    fn parse_additive(&mut self) -> Result<Expr, String> {
+    fn parse_additive(&mut self) -> Result<Expr, Diagnostic> {
         let mut lhs = self.parse_multiplicative()?;
         loop {
             let op = match self.peek() {
@@ -192,16 +229,12 @@ impl Parser {
             };
             self.next();
             let rhs = self.parse_multiplicative()?;
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
+            lhs = binary(op, lhs, rhs);
         }
         Ok(lhs)
     }
 
-    fn parse_multiplicative(&mut self) -> Result<Expr, String> {
+    fn parse_multiplicative(&mut self) -> Result<Expr, Diagnostic> {
         let mut lhs = self.parse_unary()?;
         loop {
             let op = match self.peek() {
@@ -212,32 +245,40 @@ impl Parser {
             };
             self.next();
             let rhs = self.parse_unary()?;
-            lhs = Expr::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
+            lhs = binary(op, lhs, rhs);
         }
         Ok(lhs)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, String> {
+    fn parse_unary(&mut self) -> Result<Expr, Diagnostic> {
         if self.peek() == &Tok::Minus {
+            let op_span = self.cur_span();
             self.next();
             let operand = self.parse_unary()?;
             // -x は 0 - x として表現する
-            return Ok(Expr::Binary {
-                op: BinOp::Sub,
-                lhs: Box::new(Expr::Int(0)),
-                rhs: Box::new(operand),
+            let span = op_span.merge(operand.span);
+            return Ok(Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Sub,
+                    lhs: Box::new(Expr {
+                        kind: ExprKind::Int(0),
+                        span: op_span,
+                    }),
+                    rhs: Box::new(operand),
+                },
+                span,
             });
         }
         self.parse_primary()
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, String> {
-        match self.next() {
-            Tok::Int(n) => Ok(Expr::Int(n)),
+    fn parse_primary(&mut self) -> Result<Expr, Diagnostic> {
+        let span = self.cur_span();
+        match self.next().kind {
+            Tok::Int(n) => Ok(Expr {
+                kind: ExprKind::Int(n),
+                span,
+            }),
             Tok::LParen => {
                 let e = self.parse_expr()?;
                 self.eat(&Tok::RParen)?;
@@ -259,12 +300,34 @@ impl Parser {
                         }
                     }
                     self.eat(&Tok::RParen)?;
-                    Ok(Expr::Call { name, args })
+                    Ok(Expr {
+                        kind: ExprKind::Call { name, args },
+                        span: Span::new(span.start, self.last_end),
+                    })
                 } else {
-                    Ok(Expr::Var(name))
+                    Ok(Expr {
+                        kind: ExprKind::Var(name),
+                        span,
+                    })
                 }
             }
-            other => Err(format!("式を期待しましたが {:?} が来ました", other)),
+            other => Err(
+                Diagnostic::error(format!("式を期待しましたが {:?} が来ました", other))
+                    .with_code("E0002")
+                    .at(span),
+            ),
         }
+    }
+}
+
+fn binary(op: BinOp, lhs: Expr, rhs: Expr) -> Expr {
+    let span = lhs.span.merge(rhs.span);
+    Expr {
+        kind: ExprKind::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        },
+        span,
     }
 }

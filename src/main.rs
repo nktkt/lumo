@@ -6,13 +6,16 @@
 
 mod ast;
 mod codegen;
+mod diagnostics;
 mod lexer;
 mod parser;
+mod span;
 
+use diagnostics::Diagnostic;
 use std::process::exit;
 
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.1");
+    eprintln!("Lumo compiler 0.2");
     eprintln!("使い方:");
     eprintln!("  lumo run     <file.lum>    # JITでその場で実行する");
     eprintln!("  lumo build   <file.lum>    # ネイティブ実行ファイルを生成する");
@@ -33,21 +36,20 @@ fn main() {
         exit(1);
     });
 
-    let tokens = lexer::lex(&src).unwrap_or_else(|e| {
-        eprintln!("字句解析エラー: {}", e);
-        exit(1);
-    });
-    let program = parser::parse(tokens).unwrap_or_else(|e| {
-        eprintln!("構文解析エラー: {}", e);
-        exit(1);
-    });
-
+    // 字句解析・構文解析・コード生成。エラーは位置付き診断として表示する。
     let context = inkwell::context::Context::create();
     let mut cg = codegen::CodeGen::new(&context, "lumo");
-    cg.compile(&program).unwrap_or_else(|e| {
-        eprintln!("コード生成エラー: {}", e);
+
+    let compiled: Result<(), Diagnostic> = (|| {
+        let tokens = lexer::lex(&src)?;
+        let program = parser::parse(tokens)?;
+        cg.compile(&program)
+    })();
+
+    if let Err(diag) = compiled {
+        eprint!("{}", diag.render(&src, path));
         exit(1);
-    });
+    }
 
     match cmd {
         "emit-ir" => {
