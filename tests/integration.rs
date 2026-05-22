@@ -130,6 +130,11 @@ fn strings() {
     run_ok("string");
 }
 
+#[test]
+fn conversions() {
+    run_ok("conversions");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -232,4 +237,14 @@ fn err_str_arith() {
 #[test]
 fn err_unterminated_string() {
     run_err("err_unterminated_string", "E0004");
+}
+
+#[test]
+fn err_conv_type() {
+    run_err("err_conv_type", "E0200");
+}
+
+#[test]
+fn err_reserved_name() {
+    run_err("err_reserved_name", "E0302");
 }
