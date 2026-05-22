@@ -164,6 +164,32 @@ while (i < 5) {
 }
 ```
 
+### `for`
+
+`for (init; cond; step) { ... }`. The `init` and `step` clauses are optional;
+`cond` is a `bool`. `init` runs once before the loop; `step` runs after each
+iteration. (`init` may declare a variable with `let`.)
+
+```lumo
+for (let i = 0; i < 5; i = i + 1) {
+    print i;
+}
+```
+
+### `break` and `continue`
+
+`break` leaves the nearest enclosing loop. `continue` skips to the next
+iteration — the `step` clause of a `for`, or the condition of a `while`. Using
+either outside a loop is an error.
+
+```lumo
+for (let i = 0; i < 100; i = i + 1) {
+    if (i == 10) { break; }
+    if (i % 2 == 0) { continue; }
+    print i;   # odd numbers below 10
+}
+```
+
 ## Functions
 
 ```lumo
@@ -250,6 +276,9 @@ statement   = let_stmt
             | print_stmt
             | if_stmt
             | while_stmt
+            | for_stmt
+            | break_stmt
+            | continue_stmt
             | expr_stmt ;
 
 let_stmt    = "let" ident "=" expr ";" ;
@@ -258,7 +287,13 @@ return_stmt = "return" expr ";" ;
 print_stmt  = "print" expr ";" ;
 if_stmt     = "if" "(" expr ")" block [ "else" block ] ;
 while_stmt  = "while" "(" expr ")" block ;
+for_stmt    = "for" "(" [ simple ] ";" expr ";" [ simple ] ")" block ;
+break_stmt  = "break" ";" ;
+continue_stmt = "continue" ";" ;
 expr_stmt   = expr ";" ;
+
+(* a statement without a trailing semicolon, used in for-clauses *)
+simple      = "let" ident "=" expr | ident "=" expr | expr ;
 
 (* Expressions, lowest to highest precedence. *)
 expr        = or_expr ;

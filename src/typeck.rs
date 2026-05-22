@@ -49,6 +49,7 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
             sigs: &sigs,
             vars: HashMap::new(),
             ret: f.ret,
+            loops: 0,
         };
         for p in &f.params {
             if checker.vars.insert(p.name.clone(), p.ty).is_some() {
@@ -70,6 +71,8 @@ struct FnChecker<'a> {
     sigs: &'a HashMap<String, Sig>,
     vars: HashMap<String, Type>,
     ret: Type,
+    /// 入れ子になっているループの深さ（break/continue の検査用）
+    loops: u32,
 }
 
 impl FnChecker<'_> {
@@ -131,8 +134,43 @@ impl FnChecker<'_> {
             }
             StmtKind::While { cond, body } => {
                 self.check_cond(cond)?;
+                self.loops += 1;
                 for s in body {
                     self.check_stmt(s)?;
+                }
+                self.loops -= 1;
+            }
+            StmtKind::For {
+                init,
+                cond,
+                step,
+                body,
+            } => {
+                if let Some(init) = init {
+                    self.check_stmt(init)?;
+                }
+                self.check_cond(cond)?;
+                self.loops += 1;
+                for s in body {
+                    self.check_stmt(s)?;
+                }
+                self.loops -= 1;
+                if let Some(step) = step {
+                    self.check_stmt(step)?;
+                }
+            }
+            StmtKind::Break => {
+                if self.loops == 0 {
+                    return Err(Diagnostic::error("break はループの外では使えません")
+                        .with_code("E0203")
+                        .at(stmt.span));
+                }
+            }
+            StmtKind::Continue => {
+                if self.loops == 0 {
+                    return Err(Diagnostic::error("continue はループの外では使えません")
+                        .with_code("E0203")
+                        .at(stmt.span));
                 }
             }
         }

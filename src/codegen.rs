@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
+use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
@@ -38,6 +39,8 @@ pub struct CodeGen<'ctx> {
     fn_rets: HashMap<String, Type>,
     /// 生成済みのグローバル文字列（書式・"true"/"false" など）をキャッシュ
     strings: HashMap<&'static str, PointerValue<'ctx>>,
+    /// 入れ子ループの (continue先, break先) ブロックのスタック
+    loop_stack: Vec<(BasicBlock<'ctx>, BasicBlock<'ctx>)>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -49,6 +52,7 @@ impl<'ctx> CodeGen<'ctx> {
             vars: HashMap::new(),
             fn_rets: HashMap::new(),
             strings: HashMap::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -129,14 +133,23 @@ impl<'ctx> CodeGen<'ctx> {
             self.vars.insert(p.name.clone(), (alloca, p.ty));
         }
 
-        for stmt in &f.body {
-            self.gen_stmt(stmt, function);
-        }
+        self.gen_block(&f.body, function);
 
         // 明示的な return が無いまま関数末尾に達したら戻り値型のゼロを返す
         if self.block_open() {
             let zero = self.zero_of(f.ret);
             self.builder.build_return(Some(&zero)).unwrap();
+        }
+    }
+
+    /// 文の並びを生成する。終端命令(return/break/continue)が出たら以降は
+    /// 到達不能なので生成しない（終端済みブロックへの命令追加を防ぐ）。
+    fn gen_block(&mut self, stmts: &[Stmt], function: FunctionValue<'ctx>) {
+        for s in stmts {
+            if !self.block_open() {
+                break;
+            }
+            self.gen_stmt(s, function);
         }
     }
 
@@ -226,18 +239,14 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // then 節
                 self.builder.position_at_end(then_bb);
-                for s in then_body {
-                    self.gen_stmt(s, function);
-                }
+                self.gen_block(then_body, function);
                 if self.block_open() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
 
                 // else 節
                 self.builder.position_at_end(else_bb);
-                for s in else_body {
-                    self.gen_stmt(s, function);
-                }
+                self.gen_block(else_body, function);
                 if self.block_open() {
                     self.builder.build_unconditional_branch(merge_bb).unwrap();
                 }
@@ -258,15 +267,63 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_conditional_branch(cond_val.into_int_value(), body_bb, end_bb)
                     .unwrap();
 
+                // continue は条件へ、break は末尾へ
                 self.builder.position_at_end(body_bb);
-                for s in body {
-                    self.gen_stmt(s, function);
-                }
+                self.loop_stack.push((cond_bb, end_bb));
+                self.gen_block(body, function);
+                self.loop_stack.pop();
                 if self.block_open() {
                     self.builder.build_unconditional_branch(cond_bb).unwrap();
                 }
 
                 self.builder.position_at_end(end_bb);
+            }
+            StmtKind::For {
+                init,
+                cond,
+                step,
+                body,
+            } => {
+                if let Some(init) = init {
+                    self.gen_stmt(init, function);
+                }
+                let cond_bb = self.ctx.append_basic_block(function, "for.cond");
+                let body_bb = self.ctx.append_basic_block(function, "for.body");
+                let step_bb = self.ctx.append_basic_block(function, "for.step");
+                let end_bb = self.ctx.append_basic_block(function, "for.end");
+
+                self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                self.builder.position_at_end(cond_bb);
+                let (cond_val, _) = self.gen_expr(cond);
+                self.builder
+                    .build_conditional_branch(cond_val.into_int_value(), body_bb, end_bb)
+                    .unwrap();
+
+                // continue は step へ、break は末尾へ
+                self.builder.position_at_end(body_bb);
+                self.loop_stack.push((step_bb, end_bb));
+                self.gen_block(body, function);
+                self.loop_stack.pop();
+                if self.block_open() {
+                    self.builder.build_unconditional_branch(step_bb).unwrap();
+                }
+
+                self.builder.position_at_end(step_bb);
+                if let Some(step) = step {
+                    self.gen_stmt(step, function);
+                }
+                self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                self.builder.position_at_end(end_bb);
+            }
+            StmtKind::Break => {
+                let (_, brk) = *self.loop_stack.last().unwrap();
+                self.builder.build_unconditional_branch(brk).unwrap();
+            }
+            StmtKind::Continue => {
+                let (cont, _) = *self.loop_stack.last().unwrap();
+                self.builder.build_unconditional_branch(cont).unwrap();
             }
         }
     }
