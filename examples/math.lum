@@ -1,0 +1,23 @@
+# 四則演算・関数・ループの確認用
+
+fn gcd(a, b) {
+    while (b != 0) {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
+fn square(x) {
+    return x * x;
+}
+
+fn main() {
+    print gcd(48, 36);   # => 12
+    print square(9);     # => 81
+    print 2 + 3 * 4;     # => 14 (優先順位)
+    print (2 + 3) * 4;   # => 20
+    print -5 + 8;        # => 3 (単項マイナス)
+    return 0;
+}

@@ -1,0 +1,77 @@
+//! Lumo コンパイラのエントリポイント。
+//!
+//! パイプライン:
+//!   ソース -> 字句解析(lexer) -> 構文解析(parser) -> コード生成(codegen=LLVM IR)
+//!         -> JIT実行 / ネイティブ実行ファイル生成 / IR表示
+
+mod ast;
+mod codegen;
+mod lexer;
+mod parser;
+
+use std::process::exit;
+
+fn usage() -> ! {
+    eprintln!("Lumo compiler 0.1");
+    eprintln!("使い方:");
+    eprintln!("  lumo run     <file.lum>    # JITでその場で実行する");
+    eprintln!("  lumo build   <file.lum>    # ネイティブ実行ファイルを生成する");
+    eprintln!("  lumo emit-ir <file.lum>    # 生成されるLLVM IRを表示する");
+    exit(1);
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 3 {
+        usage();
+    }
+    let cmd = args[1].as_str();
+    let path = &args[2];
+
+    let src = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("ファイルを読めません {}: {}", path, e);
+        exit(1);
+    });
+
+    let tokens = lexer::lex(&src).unwrap_or_else(|e| {
+        eprintln!("字句解析エラー: {}", e);
+        exit(1);
+    });
+    let program = parser::parse(tokens).unwrap_or_else(|e| {
+        eprintln!("構文解析エラー: {}", e);
+        exit(1);
+    });
+
+    let context = inkwell::context::Context::create();
+    let mut cg = codegen::CodeGen::new(&context, "lumo");
+    cg.compile(&program).unwrap_or_else(|e| {
+        eprintln!("コード生成エラー: {}", e);
+        exit(1);
+    });
+
+    match cmd {
+        "emit-ir" => {
+            print!("{}", cg.ir_string());
+        }
+        "run" => {
+            let code = cg.jit_run().unwrap_or_else(|e| {
+                eprintln!("実行エラー: {}", e);
+                exit(1);
+            });
+            exit(code as i32);
+        }
+        "build" => {
+            // 入力パスから拡張子を除いた名前を実行ファイル名にする (fib.lum -> fib)
+            let out = std::path::Path::new(path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "a.out".to_string());
+            cg.build_executable(&out).unwrap_or_else(|e| {
+                eprintln!("ビルドエラー: {}", e);
+                exit(1);
+            });
+            eprintln!("生成しました: ./{}", out);
+        }
+        _ => usage(),
+    }
+}

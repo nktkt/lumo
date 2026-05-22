@@ -1,0 +1,5 @@
+/target
+*.o
+# compiled native executables produced by `lumo build`
+/fib
+/math
