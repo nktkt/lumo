@@ -558,8 +558,9 @@ if (is_int(s)) {
 
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`,
 `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, `delete`,
-`substr`, `split`, `join`, `is_int`, `is_float`, `read_file`, and `write_file`
-are reserved names — you cannot define a function with one of them.
+`substr`, `split`, `join`, `is_int`, `is_float`, `read_file`, `write_file`,
+`to_upper`, `to_lower`, `trim`, `find`, and `contains` are reserved names — you
+cannot define a function with one of them.
 
 ### `read_line`
 
@@ -650,6 +651,34 @@ print join(split("x-y-z", "-"), "+");  # x+y+z  (round trip)
 
 To turn a parsed field into a number, use `int(s)` / `float(s)` (guarded by
 `is_int` / `is_float`) — see [Conversions and parsing](#conversions-and-parsing).
+
+### `to_upper` / `to_lower` / `trim` / `find` / `contains`
+
+String methods for normalizing and searching text:
+
+- **`to_upper(s)`** / **`to_lower(s)`** → a new `string` with ASCII letters
+  upper/lower-cased; every other byte is passed through unchanged.
+- **`trim(s)`** → a new `string` with leading and trailing ASCII whitespace
+  (space, tab, `\n`, `\r`) removed. Interior whitespace is left alone.
+- **`find(s, sub)`** → the byte index of the first occurrence of `sub` in `s`, or
+  `-1` if it does not occur. An empty `sub` returns `0`.
+- **`contains(s, sub)`** → a `bool`, true when `sub` occurs in `s` (i.e.
+  `find(s, sub) >= 0`).
+
+```lumo
+print to_upper("Hello");        # HELLO
+print trim("  hi  ");           # hi   (no surrounding spaces)
+print find("hello", "ll");      # 2
+print contains("hello", "ell"); # true
+
+# normalize input before comparing
+let answer = to_lower(trim(read_line()));
+if (answer == "yes") { print "confirmed"; }
+```
+
+Like `+` concatenation and `substr`, these return freshly allocated strings (the
+input is never modified). To replace text, combine `split` and `join` —
+`join(split(s, old), new)` swaps every `old` for `new`.
 
 ### `len`
 

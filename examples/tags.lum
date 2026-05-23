@@ -1,0 +1,44 @@
+# Normalizing and searching text with the string methods.
+#
+# A common chore: take a messy, comma-separated list of tags and clean it up —
+# trim the surrounding spaces, lowercase everything — then answer membership and
+# substring queries. This uses split + trim + to_lower + contains/find together.
+#
+#   cargo run -- run examples/tags.lum
+#   ->  rust / web dev / cli / database
+#      has "cli"? true
+#      has "java"? false
+#      any tag mentions "data"? database
+
+fn main() {
+    let raw = "  Rust , Web Dev,CLI ,  Database ";
+
+    # Split on commas, then trim + lowercase each piece into a clean list.
+    let tags: [string] = [];
+    for (part in split(raw, ",")) {
+        tags = push(tags, to_lower(trim(part)));
+    }
+    print join(tags, " / ");          # rust / web dev / cli / database
+
+    # Exact membership: is "cli" one of the tags?
+    print "has \"cli\"? " + str(has_tag(tags, "cli"));    # true
+    print "has \"java\"? " + str(has_tag(tags, "java"));  # false
+
+    # Substring search across tags: which tag mentions "data"?
+    for (t in tags) {
+        if (contains(t, "data")) {
+            print "any tag mentions \"data\"? " + t;       # database
+        }
+    }
+    return 0;
+}
+
+# True if `want` exactly equals one of the tags.
+fn has_tag(tags: [string], want: string) -> bool {
+    for (t in tags) {
+        if (t == want) {
+            return true;
+        }
+    }
+    return false;
+}

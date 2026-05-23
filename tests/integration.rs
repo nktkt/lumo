@@ -288,6 +288,11 @@ fn nested_collections() {
     run_ok("nested");
 }
 
+#[test]
+fn string_methods() {
+    run_ok("string_methods");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {
