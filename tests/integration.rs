@@ -175,6 +175,11 @@ fn string_index() {
     run_ok("string_index");
 }
 
+#[test]
+fn chr_builtin() {
+    run_ok("chr");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]

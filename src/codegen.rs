@@ -668,6 +668,41 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
             }
+            ExprKind::Call { name, args } if name == "chr" => {
+                // バイト値を 1 文字（NUL 終端）のヒープ文字列にする
+                let (v, _) = self.gen_expr(&args[0]);
+                let byte = self
+                    .builder
+                    .build_int_truncate(v.into_int_value(), self.ctx.i8_type(), "chrbyte")
+                    .unwrap();
+                let alloc = self.module.get_function("lumo_alloc").unwrap();
+                let buf = self
+                    .builder
+                    .build_call(
+                        alloc,
+                        &[self.ctx.i64_type().const_int(2, false).into()],
+                        "chrbuf",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+                self.builder.build_store(buf, byte).unwrap();
+                let nul_addr = unsafe {
+                    self.builder
+                        .build_in_bounds_gep(
+                            self.ctx.i8_type(),
+                            buf,
+                            &[self.ctx.i64_type().const_int(1, false)],
+                            "nuladdr",
+                        )
+                        .unwrap()
+                };
+                self.builder
+                    .build_store(nul_addr, self.ctx.i8_type().const_int(0, false))
+                    .unwrap();
+                (buf.into(), Type::Str)
+            }
             ExprKind::Call { name, args } if name == "str" => {
                 let (v, ty) = self.gen_expr(&args[0]);
                 match ty {
