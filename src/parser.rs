@@ -186,21 +186,16 @@ impl Parser {
                 // それ以外は構造体名（実在するかは typeck が検証）
                 _ => Ok((Type::Struct(intern(&name)), span)),
             },
-            // 配列型 [T]（T はスカラ。入れ子の配列は不可）
+            // 配列型 [T]（T はスカラ・構造体・配列・map。入れ子可）
             Tok::LBracket => {
-                let (elem_ty, elem_span) = self.parse_type()?;
+                let (elem_ty, _) = self.parse_type()?;
                 self.eat(&Tok::RBracket)?;
                 let full = Span::new(span.start, self.last_end);
-                let elem = elem_ty.as_elem().ok_or_else(|| {
-                    Diagnostic::error(
-                        "配列の要素にできるのは int/bool/float/string です（配列の配列は不可）",
-                    )
-                    .with_code("E0300")
-                    .at(elem_span)
-                })?;
+                // 型注釈に null は書けないので as_elem は必ず Some
+                let elem = elem_ty.as_elem().expect("型注釈に null は現れない");
                 Ok((Type::Array(elem), full))
             }
-            // map 型 {string: V}（キーは string 固定、値はスカラ/構造体）
+            // map 型 {string: V}（キーは string 固定、値はスカラ・構造体・配列・map）
             Tok::LBrace => {
                 let (key_ty, key_span) = self.parse_type()?;
                 if key_ty != Type::Str {
@@ -212,16 +207,10 @@ impl Parser {
                     .at(key_span));
                 }
                 self.eat(&Tok::Colon)?;
-                let (val_ty, val_span) = self.parse_type()?;
+                let (val_ty, _) = self.parse_type()?;
                 self.eat(&Tok::RBrace)?;
                 let full = Span::new(span.start, self.last_end);
-                let v = val_ty.as_elem().ok_or_else(|| {
-                    Diagnostic::error(
-                        "map の値にできるのは int/bool/float/string/構造体です（配列やmapは不可）",
-                    )
-                    .with_code("E0300")
-                    .at(val_span)
-                })?;
+                let v = val_ty.as_elem().expect("型注釈に null は現れない");
                 Ok((Type::Map(v), full))
             }
             other => Err(

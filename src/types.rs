@@ -1,7 +1,9 @@
 //! Lumo の値の型。型検査(typeck)とコード生成(codegen)で共有する。
 
-/// 配列の要素型（スカラと構造体。配列の配列は今のところ非対応）。
-/// これにより [`Type`] が `Box` 無しで `Copy` のままでいられる。
+/// 配列の要素型・map の値型。スカラ・構造体に加え、配列/map も入れ子にできる
+/// （`[[int]]` や `{string: [int]}` など）。入れ子の要素型は `intern_elem` で
+/// リークした `&'static Elem` で指すので、[`Type`] は `Box` 無しで `Copy` のまま。
+/// 参照同士の `==` は指す先を比較するので、入れ子の型も構造的に等価判定できる。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Elem {
     Int,
@@ -9,6 +11,11 @@ pub enum Elem {
     Float,
     Str,
     Struct(&'static str),
+    /// 配列を要素に持つ（`[[T]]`）。指す先はその内側の配列の要素型。
+    Array(&'static Elem),
+    /// map を要素/値に持つ（`[{string: V}]` や `{string: {string: V}}`）。
+    /// キーは常に string なので、指す先は値型のみ。
+    Map(&'static Elem),
 }
 
 impl Elem {
@@ -19,6 +26,8 @@ impl Elem {
             Elem::Float => "float".to_string(),
             Elem::Str => "string".to_string(),
             Elem::Struct(n) => n.to_string(),
+            Elem::Array(e) => format!("[{}]", e.name()),
+            Elem::Map(v) => format!("{{string: {}}}", v.name()),
         }
     }
 
@@ -29,6 +38,8 @@ impl Elem {
             Elem::Float => Type::Float,
             Elem::Str => Type::Str,
             Elem::Struct(n) => Type::Struct(n),
+            Elem::Array(e) => Type::Array(*e),
+            Elem::Map(v) => Type::Map(*v),
         }
     }
 }
@@ -79,7 +90,9 @@ impl Type {
         )
     }
 
-    /// 配列の要素型として使えるスカラ型なら、その `Elem` を返す。
+    /// 配列の要素型・map の値型として使える `Elem` に変換する。配列/map も
+    /// 入れ子にできる（内側の要素型を `intern_elem` でリークして指す）。`null`
+    /// は型が決まらないので要素型/値型にはできない。
     pub fn as_elem(self) -> Option<Elem> {
         match self {
             Type::Int => Some(Elem::Int),
@@ -87,8 +100,9 @@ impl Type {
             Type::Float => Some(Elem::Float),
             Type::Str => Some(Elem::Str),
             Type::Struct(n) => Some(Elem::Struct(n)),
-            // 配列の配列・map・null は要素型/値型にできない（v1）
-            Type::Array(_) | Type::Map(_) | Type::Null => None,
+            Type::Array(e) => Some(Elem::Array(intern_elem(e))),
+            Type::Map(v) => Some(Elem::Map(intern_elem(v))),
+            Type::Null => None,
         }
     }
 }
@@ -97,4 +111,10 @@ impl Type {
 /// 構造体名を `Type::Struct` に埋め込み Copy を保つために使う。
 pub fn intern(s: &str) -> &'static str {
     Box::leak(s.to_string().into_boxed_str())
+}
+
+/// 入れ子コレクションの要素型を `&'static Elem` にする（`intern` と同じ方針で
+/// リーク）。`Elem::Array`/`Elem::Map` に埋め込み `Copy` を保つために使う。
+pub fn intern_elem(e: Elem) -> &'static Elem {
+    Box::leak(Box::new(e))
 }

@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.29.0]
+
+### Added
+
+- **Nested collections.** Arrays and maps can now hold other arrays and maps as their element/value type, to any depth: `[[int]]` (a matrix), `{string: [int]}` (group-by), `[{string: int}]` (records), `{string: {string: int}}` (nested map). Indexing chains (`grid[i][j]`) and assignment works at any level (`grid[i][j] = v`, `m["a"]["b"] = v`) because inner collections are references.
+- `examples/matrix.lum`: matrix multiplication over `[[int]]`.
+
+### Notes
+
+- No runtime/codegen changes were needed: every collection value is already a pointer stored in an 8-byte slot, so nesting is free in the value model. The change is purely in the type system (`Elem` can now represent collection element/value types). The empty-literal annotation rule still applies at each level, and `null` cannot be an element/value type (its type can't be inferred).
+
 ## [0.28.0]
 
 ### Added

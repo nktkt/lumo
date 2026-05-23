@@ -22,18 +22,15 @@ type Structs = HashMap<String, Vec<(String, Type)>>;
 
 /// 型が実在する型を指すか検証する（構造体名が定義済みか。配列の要素も見る）。
 fn validate_type(t: Type, structs: &Structs, span: Span) -> Result<(), Diagnostic> {
-    let struct_name = match t {
-        Type::Struct(n) => Some(n),
-        Type::Array(crate::types::Elem::Struct(n)) => Some(n),
-        Type::Map(crate::types::Elem::Struct(n)) => Some(n),
-        _ => None,
-    };
-    if let Some(n) = struct_name {
-        if !structs.contains_key(n) {
+    match t {
+        Type::Struct(n) if !structs.contains_key(n) => {
             return Err(Diagnostic::error(format!("不明な型: {}", n))
                 .with_code("E0300")
                 .at(span));
         }
+        // 入れ子コレクションは内側の要素型まで再帰的に検証する（[[Point]] など）
+        Type::Array(e) | Type::Map(e) => validate_type(e.to_type(), structs, span)?,
+        _ => {}
     }
     Ok(())
 }
@@ -900,10 +897,9 @@ impl FnChecker<'_> {
                 })?;
                 let elem_ty = self.check_expr(first)?;
                 let elem = elem_ty.as_elem().ok_or_else(|| {
-                    Diagnostic::error(format!(
-                        "配列の要素にできるのは int/bool/float/string です（{} は不可）",
-                        elem_ty.name()
-                    ))
+                    Diagnostic::error(
+                        "配列リテラルの要素を null にはできません（要素型を推論できません）",
+                    )
                     .with_code("E0206")
                     .at(first.span)
                 })?;
@@ -924,10 +920,9 @@ impl FnChecker<'_> {
                 expect(Type::Str, self.check_expr(k0)?, k0.span)?;
                 let val_ty = self.check_expr(v0)?;
                 let v = val_ty.as_elem().ok_or_else(|| {
-                    Diagnostic::error(format!(
-                        "map の値にできるのは int/bool/float/string/構造体です（{} は不可）",
-                        val_ty.name()
-                    ))
+                    Diagnostic::error(
+                        "map リテラルの値を null にはできません（値型を推論できません）",
+                    )
                     .with_code("E0206")
                     .at(v0.span)
                 })?;

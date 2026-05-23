@@ -1,0 +1,58 @@
+# Matrix multiplication with nested arrays.
+#
+# Now that arrays can hold arrays, a matrix is just a [[int]] — a list of rows.
+# This builds two matrices, multiplies them, and prints the result row by row,
+# showing 2D literals, chained indexing (m[i][j]), and growing nested arrays
+# with push.
+#
+#   cargo run -- run examples/matrix.lum
+#   ->  58 64
+#      139 154
+
+# Multiply an (n x m) matrix by an (m x p) matrix, returning an (n x p) matrix.
+fn matmul(a: [[int]], b: [[int]]) -> [[int]] {
+    let n = len(a);
+    let m = len(b);
+    let p = len(b[0]);
+
+    let out: [[int]] = [];
+    for (let i = 0; i < n; i = i + 1) {
+        let row: [int] = [];
+        for (let j = 0; j < p; j = j + 1) {
+            let sum = 0;
+            for (let k = 0; k < m; k = k + 1) {
+                sum = sum + a[i][k] * b[k][j];
+            }
+            row = push(row, sum);
+        }
+        out = push(out, row);
+    }
+    return out;
+}
+
+# Render a matrix as right-aligned-ish rows of space-separated numbers.
+fn show(mat: [[int]]) {
+    for (row in mat) {
+        let line = "";
+        let first = true;
+        for (x in row) {
+            if (first) {
+                line = str(x);
+                first = false;
+            } else {
+                line = line + " " + str(x);
+            }
+        }
+        print line;
+    }
+}
+
+fn main() {
+    # a is 2x3, b is 3x2, so a*b is 2x2
+    let a = [[1, 2, 3], [4, 5, 6]];
+    let b = [[7, 8], [9, 10], [11, 12]];
+
+    let c = matmul(a, b);
+    show(c);            # 58 64 / 139 154
+    return 0;
+}
