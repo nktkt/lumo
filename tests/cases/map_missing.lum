@@ -1,0 +1,7 @@
+# Indexing a missing key aborts at runtime.
+fn main() {
+    let m: {string: int} = {};
+    m["a"] = 1;
+    print m["missing"];
+    return 0;
+}

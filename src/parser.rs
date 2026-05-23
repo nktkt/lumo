@@ -188,6 +188,30 @@ impl Parser {
                 })?;
                 Ok((Type::Array(elem), full))
             }
+            // map 型 {string: V}（キーは string 固定、値はスカラ/構造体）
+            Tok::LBrace => {
+                let (key_ty, key_span) = self.parse_type()?;
+                if key_ty != Type::Str {
+                    return Err(Diagnostic::error(format!(
+                        "map のキーは string でなければなりません（{} は不可）",
+                        key_ty.name()
+                    ))
+                    .with_code("E0300")
+                    .at(key_span));
+                }
+                self.eat(&Tok::Colon)?;
+                let (val_ty, val_span) = self.parse_type()?;
+                self.eat(&Tok::RBrace)?;
+                let full = Span::new(span.start, self.last_end);
+                let v = val_ty.as_elem().ok_or_else(|| {
+                    Diagnostic::error(
+                        "map の値にできるのは int/bool/float/string/構造体です（配列やmapは不可）",
+                    )
+                    .with_code("E0300")
+                    .at(val_span)
+                })?;
+                Ok((Type::Map(v), full))
+            }
             other => Err(
                 Diagnostic::error(format!("型名を期待しましたが {:?} が来ました", other))
                     .with_code("E0300")
@@ -538,6 +562,33 @@ impl Parser {
                 self.eat(&Tok::RBracket)?;
                 Ok(Expr {
                     kind: ExprKind::Array(elems),
+                    span: Span::new(span.start, self.last_end),
+                })
+            }
+            // map リテラル {key: value, ...}（先頭が名前なら構造体リテラルなので、
+            // ここに来る `{` は必ず map。空 `{}` も可）
+            Tok::LBrace => {
+                let mut pairs = Vec::new();
+                if self.peek() != &Tok::RBrace {
+                    loop {
+                        let key = self.parse_expr()?;
+                        self.eat(&Tok::Colon)?;
+                        let value = self.parse_expr()?;
+                        pairs.push((key, value));
+                        if self.peek() == &Tok::Comma {
+                            self.next();
+                            // 末尾カンマを許す
+                            if self.peek() == &Tok::RBrace {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.eat(&Tok::RBrace)?;
+                Ok(Expr {
+                    kind: ExprKind::MapLit(pairs),
                     span: Span::new(span.start, self.last_end),
                 })
             }

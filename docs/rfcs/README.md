@@ -7,7 +7,7 @@ recommendation, and invites pushback **before** implementation begins.
 | RFC | Title | Status |
 | --- | --- | --- |
 | [0001](0001-memory-model.md) | Memory-management strategy (arena vs GC vs ownership) | Proposed (draft) |
-| [0002](0002-map-type.md) | A built-in `map` (associative array) type | Proposed (draft) |
+| [0002](0002-map-type.md) | A built-in `map` (associative array) type | Implemented (v0.24.0) |
 
 ## Process
 

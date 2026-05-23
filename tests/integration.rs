@@ -238,6 +238,21 @@ fn math_builtins() {
     run_ok("math");
 }
 
+#[test]
+fn maps() {
+    run_ok("map");
+}
+
+#[test]
+fn map_keys_and_collisions() {
+    run_ok("map_keys");
+}
+
+#[test]
+fn map_missing_key_aborts() {
+    run_err("map_missing", "key not found");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {

@@ -55,4 +55,5 @@ Listed from simplest to most advanced:
 | [`structs.lum`](structs.lum) | Structs — `struct` declarations, `Name { field: value }` construction, `obj.field` read/write, nested struct-typed fields, and field mutation. |
 | [`points.lum`](points.lum) | Arrays of structs `[Point]` — indexing yields a reference, so `ps[i].x` reads and mutates in place while computing a centroid. |
 | [`sum_stdin.lum`](sum_stdin.lum) | Reading input — `read_line()` returning a line or `null` at end of input, looped to parse and sum integers piped on stdin. |
-| [`linked_list.lum`](linked_list.lum) | `null` as a nullable reference plus a self-referential `struct Node` — a recursive linked list with push, traversal, and in-place reversal. |
+| [`wordcount.lum`](wordcount.lum) | Maps — tally word frequencies from stdin in a `{string: int}`, then print each unique word and count using `has`, `keys`, and a sort. |
+| [`linked_list.lum`](linked_list.lum) | `null` as a nullable reference plus a self-referential `struct Node` — a recursive linked list with prepend, traversal, and in-place reversal. |

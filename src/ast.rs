@@ -70,6 +70,8 @@ pub enum ExprKind {
         name: String,
         fields: Vec<FieldInit>,
     },
+    /// map リテラル `{key: value, ...}`（空 `{}` も。キー・値は式）
+    MapLit(Vec<(Expr, Expr)>),
     /// フィールドアクセス `obj.field`
     Field {
         obj: Box<Expr>,

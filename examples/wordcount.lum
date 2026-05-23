@@ -1,0 +1,40 @@
+# Word-frequency counter: read words from standard input (one per line),
+# tally them in a map, then print each unique word with its count in
+# alphabetical order. This is the capstone of maps + read_line + keys + sorting:
+# the number of distinct words is unknown until the input is consumed.
+#
+#   printf 'apple\nbanana\napple\ncherry\nbanana\napple\n' | lumo run examples/wordcount.lum
+#   -> apple: 3 / banana: 2 / cherry: 1
+
+fn main() {
+    let counts: {string: int} = {};
+
+    let line = read_line();
+    while (line != null) {
+        if (has(counts, line)) {
+            counts[line] = counts[line] + 1;
+        } else {
+            counts[line] = 1;
+        }
+        line = read_line();
+    }
+
+    # keys() order is unspecified, so sort for stable output
+    let ks = keys(counts);
+    let i = 1;
+    while (i < len(ks)) {
+        let key = ks[i];
+        let j = i - 1;
+        while (j >= 0 && ks[j] > key) {
+            ks[j + 1] = ks[j];
+            j = j - 1;
+        }
+        ks[j + 1] = key;
+        i = i + 1;
+    }
+
+    for (let k = 0; k < len(ks); k = k + 1) {
+        print ks[k] + ": " + str(counts[ks[k]]);
+    }
+    return 0;
+}

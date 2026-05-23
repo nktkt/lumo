@@ -6,7 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 ## [Unreleased]
 
-- `docs/rfcs/0002-map-type.md`: a design RFC proposing a built-in associative `map` type (`{string: V}`), and `docs/rfcs/README.md` indexing the RFCs. Design only — no compiler change yet.
+- _Nothing yet._
+
+## [0.24.0]
+
+### Added
+
+- **Maps (associative arrays).** A built-in `{string: V}` type implementing [RFC 0002](docs/rfcs/0002-map-type.md): string keys, values of any scalar/struct type. Literals `{}` (empty needs a type annotation, like `[]`) and `{"a": 1, "b": 2}`; indexed `m[k]` (read — **aborts on a missing key**, exit 101) and `m[k] = v` (insert/update); and the built-ins `has(m, k) -> bool`, `len(m)`, `delete(m, k)`, and `keys(m) -> [string]` (order unspecified). Backed by a separately-chained hash table in the runtime (FNV-1a, fixed bucket count for now — no resize yet).
+- `docs/rfcs/0002-map-type.md` (the design RFC) and `docs/rfcs/README.md` (RFC index).
+- `examples/wordcount.lum`: a stdin word-frequency counter (maps + `read_line` + `keys` + sorting).
+
+### Notes
+
+- Map values are limited to scalars and structs in v1 (no array- or map-valued maps yet); see RFC 0002. Entries are not freed until program exit (RFC 0001).
 
 ## [0.23.0]
 
