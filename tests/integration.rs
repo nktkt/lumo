@@ -293,6 +293,11 @@ fn string_methods() {
     run_ok("string_methods");
 }
 
+#[test]
+fn string_replace_repeat() {
+    run_ok("replace_repeat");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {

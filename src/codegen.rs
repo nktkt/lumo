@@ -1697,6 +1697,94 @@ impl<'ctx> CodeGen<'ctx> {
                 .unwrap_basic();
             self.builder.build_return(Some(&r)).unwrap();
         }
+
+        // --- ptr lumo_repeat(ptr s, i64 n): s を n 回連結した新規文字列（n<=0 は空）---
+        let rep_fn = self.module.add_function(
+            "lumo_repeat",
+            ptr.fn_type(&[ptr.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(rep_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(rep_fn, "loop");
+            let body_bb = self.ctx.append_basic_block(rep_fn, "body");
+            let fin_bb = self.ctx.append_basic_block(rep_fn, "fin");
+            let s = rep_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let n = rep_fn.get_nth_param(1).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let memcpy = self.module.get_function("memcpy").unwrap();
+            let slen = self
+                .builder
+                .build_call(strlen, &[s.into()], "slen")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            // count = max(n, 0)
+            let neg = self
+                .builder
+                .build_int_compare(IntPredicate::SLT, n, i64t.const_zero(), "neg")
+                .unwrap();
+            let count = self
+                .builder
+                .build_select(neg, i64t.const_zero(), n, "count")
+                .unwrap()
+                .into_int_value();
+            let total = self.builder.build_int_mul(slen, count, "total").unwrap();
+            let size = self
+                .builder
+                .build_int_add(total, i64t.const_int(1, false), "size")
+                .unwrap();
+            let buf = self
+                .builder
+                .build_call(alloc, &[size.into()], "buf")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let k_ptr = self.builder.build_alloca(i64t, "k").unwrap();
+            self.builder.build_store(k_ptr, i64t.const_zero()).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(loop_bb);
+            let kv = self
+                .builder
+                .build_load(i64t, k_ptr, "k")
+                .unwrap()
+                .into_int_value();
+            let done = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, kv, count, "done")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(done, fin_bb, body_bb)
+                .unwrap();
+            self.builder.position_at_end(body_bb);
+            let off = self.builder.build_int_mul(kv, slen, "off").unwrap();
+            let dst = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[off], "dst")
+                    .unwrap()
+            };
+            self.builder
+                .build_call(memcpy, &[dst.into(), s.into(), slen.into()], "")
+                .unwrap();
+            let knext = self
+                .builder
+                .build_int_add(kv, i64t.const_int(1, false), "knext")
+                .unwrap();
+            self.builder.build_store(k_ptr, knext).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(fin_bb);
+            let bend = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[total], "bend")
+                    .unwrap()
+            };
+            self.builder.build_store(bend, i8t.const_zero()).unwrap();
+            self.builder.build_return(Some(&buf)).unwrap();
+        }
     }
 
     /// あるバイト値が ASCII 空白(空白/タブ/改行/復帰)かどうかを表す i1 を作る。
@@ -3467,6 +3555,40 @@ impl<'ctx> CodeGen<'ctx> {
                         .unwrap();
                     (found.into(), Type::Bool)
                 }
+            }
+            ExprKind::Call { name, args } if name == "replace" => {
+                // replace(s, from, to) == join(split(s, from), to)。split は空 from で
+                // [s] を返す（無限ループにならない）ので、全ケースを既存実装が処理する。
+                let (sv, _) = self.gen_expr(&args[0]);
+                let (fromv, _) = self.gen_expr(&args[1]);
+                let (tov, _) = self.gen_expr(&args[2]);
+                let split = self.module.get_function("lumo_split").unwrap();
+                let parts = self
+                    .builder
+                    .build_call(split, &[sv.into(), fromv.into()], "rsplit")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                let join = self.module.get_function("lumo_join").unwrap();
+                let r = self
+                    .builder
+                    .build_call(join, &[parts.into(), tov.into()], "rjoin")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Str)
+            }
+            ExprKind::Call { name, args } if name == "repeat" => {
+                let (sv, _) = self.gen_expr(&args[0]);
+                let (nv, _) = self.gen_expr(&args[1]);
+                let f = self.module.get_function("lumo_repeat").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[sv.into(), nv.into()], "repeat")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Str)
             }
             ExprKind::Call { name, args } if name == "read_file" => {
                 // read_file(path): ファイル全体を文字列で返す。開けなければ null。

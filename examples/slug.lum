@@ -1,0 +1,33 @@
+# Turning a title into a URL slug, with a repeat-drawn banner.
+#
+# replace rewrites text (swap spaces for dashes, drop stray punctuation) and
+# repeat builds runs of a character (here, an underline as wide as the title).
+# Together with trim + to_lower this is the classic "slugify" chore.
+#
+#   cargo run -- run examples/slug.lum
+#   ->  Hello, World!  A Draft
+#      ======================
+#      slug: hello-world-a-draft
+
+fn slugify(title: string) -> string {
+    # lowercase and trim the edges
+    let s = to_lower(trim(title));
+    # drop punctuation we don't want in a slug
+    s = replace(s, ",", "");
+    s = replace(s, "!", "");
+    s = replace(s, ".", "");
+    # collapse the common double-space, then spaces become dashes
+    s = replace(s, "  ", " ");
+    s = replace(s, " ", "-");
+    return s;
+}
+
+fn main() {
+    let title = "  Hello, World!  A Draft  ";
+    let shown = trim(title);
+    print shown;
+    # underline exactly as wide as the (trimmed) title
+    print repeat("=", len(shown));
+    print "slug: " + slugify(title);
+    return 0;
+}
