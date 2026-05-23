@@ -10,6 +10,26 @@ we learn. Versions are targets, not promises. Everything before `v1.0` may break
 
 ---
 
+## Progress so far
+
+What is implemented today — all merged to `main`, CI green, across PRs #1–#11:
+
+- [x] **Foundations:** byte-offset source spans, rich diagnostics (error codes + caret), an end-to-end test harness, and GitHub Actions CI (`fmt` + `clippy` + `build` + `test` on Ubuntu/macOS with LLVM 22).
+- [x] **Types:** `int`, `bool`, `float`, `string`, and arrays `[T]`.
+- [x] **Type annotations** on functions (`fn f(x: int) -> bool`) and a dedicated type-checking pass (separate from codegen).
+- [x] **Numeric conversions:** the `int()` / `float()` built-ins.
+- [x] **Control flow:** `if`/`else`, `while`, `for`, `break`, `continue`.
+- [x] **Block scoping** with shadowing (lexical).
+- [x] **A minimal heap runtime** (`lumo_alloc`): string concatenation (`+`) and equality (`==` / `!=`); arrays (literals, bounds-checked indexing read/write, `len`).
+- [x] **Optimization:** LLVM optimization passes via `-O0`..`-O3`.
+- [x] **Backends:** JIT (`run`), native executable (`build`, links libc via clang), and `emit-ir`.
+- [x] **Docs:** a tutorial, a language reference, a compiler-internals guide, RFC 0001 (memory model), an examples catalog, and a CHANGELOG.
+
+Still open: memory reclamation, `struct`s, and modules. See
+[Immediate next steps](#immediate-next-steps-next-few-prs).
+
+---
+
 ## Design principles
 
 These constraints shape every decision below.
@@ -27,41 +47,49 @@ These constraints shape every decision below.
 
 ---
 
-## Where we are — v0.1 (done)
+## The v0.1 milestone (historical)
 
-Proof of concept. The full pipeline works end to end:
+The proof of concept that started it all. The full pipeline worked end to end:
 
 `lexer → parser → AST → LLVM IR codegen → JIT / native executable / IR dump`
 
 - `i64`-only values; `+ - * / %`, comparisons, `if/while`, recursive functions, `print`.
 - Three CLI modes: `run` (JIT), `build` (native), `emit-ir`.
 
-**Known limits to remove next:** no source locations in errors, one numeric type,
-no heap types (strings/arrays), no type checker, no test suite or CI.
+Every limit of v0.1 — no source locations, one numeric type, no heap types, no
+type checker, no test suite or CI — has since been removed; see
+[Progress so far](#progress-so-far) for the current state.
 
 ---
 
 ## The path at a glance
 
-| Phase | Version | Theme | Outcome |
-|------:|---------|-------|---------|
-| 0 | `v0.1` | Proof of concept ✅ | Compiles & runs basic programs through LLVM |
-| 1 | `v0.2` | **Foundations** | Source spans, rich diagnostics, test harness, CI |
-| 2 | `v0.3` | **A useful language** | `bool`/`float`/`string`/arrays, richer control flow |
-| 3 | `v0.4` | **Type system** | Static type checking + local inference, `struct`s |
-| 4 | `v0.5` | **Memory & runtime** | Heap model decision (GC vs ownership), core stdlib |
-| 5 | `v0.6` | **Modules & packages** | Module system, FFI, package manager + registry (alpha) |
-| 6 | `v0.7` | **Tooling & DX** | LSP, formatter, REPL, debug info (DWARF) |
-| 7 | `v0.8` | **Abstraction** | Generics, traits/interfaces, ADTs + pattern matching |
-| 8 | `v0.9` | **Compiler scale** | Query-based incremental + parallel compilation, opt passes |
-| 9 | `v1.0` | **Production-ready** | Stability guarantees, multi-target (incl. WASM), docs, governance |
-| 10 | `1.x+` | **Scale-out** | Concurrency, self-hosting, ecosystem, performance leadership |
+Status: ✅ done · 🟡 partial · ⬜ not started.
+
+| Phase | Version | Theme | Status | Outcome |
+|------:|---------|-------|:------:|---------|
+| 0 | `v0.1` | Proof of concept | ✅ | Compiles & runs basic programs through LLVM |
+| 1 | `v0.2` | **Foundations** | ✅ | Source spans, rich diagnostics, test harness, CI |
+| 2 | `v0.3` | **A useful language** | ✅ | `bool`/`float`/`string`/arrays, richer control flow |
+| 3 | `v0.4` | **Type system** | 🟡 | Annotations + a type-checking pass done; generics/traits/`struct`s not done |
+| 4 | `v0.5` | **Memory & runtime** | 🟡 | Minimal malloc-backed allocator done; reclamation + heap-model decision open |
+| — | — | **Optimization** | 🟡 | `-O0`..`-O3` done; incremental/parallel compilation not done |
+| 5 | `v0.6` | **Modules & packages** | ⬜ | Module system, FFI, package manager + registry (alpha) |
+| 6 | `v0.7` | **Tooling & DX** | ⬜ | LSP, formatter, REPL, debug info (DWARF) |
+| 7 | `v0.8` | **Abstraction** | ⬜ | Generics, traits/interfaces, ADTs + pattern matching |
+| 8 | `v0.9` | **Compiler scale** | ⬜ | Query-based incremental + parallel compilation, opt passes |
+| 9 | `v1.0` | **Production-ready** | ⬜ | Stability guarantees, multi-target (incl. WASM), docs, governance |
+| 10 | `1.x+` | **Scale-out** | ⬜ | Concurrency, self-hosting, ecosystem, performance leadership |
+
+> Note: optimization (`-O` flags) was originally scoped under Phase 8 (Compiler
+> scale) but landed early; the rest of that phase (incremental + parallel
+> compilation) is still outstanding.
 
 ---
 
 ## Phases in detail
 
-### Phase 1 — Foundations (`v0.2`)
+### Phase 1 — Foundations (`v0.2`) ✅
 *Make the project safe to build on.*
 
 - Track byte/line/column **spans** in the lexer and parser.
@@ -72,7 +100,7 @@ no heap types (strings/arrays), no type checker, no test suite or CI.
 
 **Exit:** every error points at a source location; a green CI gate runs on every PR.
 
-### Phase 2 — A useful language (`v0.3`)
+### Phase 2 — A useful language (`v0.3`) ✅
 *More than integers.*
 
 - Types at the value level: `bool`, `float` (f64), `string`, with literals.
@@ -82,23 +110,25 @@ no heap types (strings/arrays), no type checker, no test suite or CI.
 
 **Exit:** can write small real programs (string manipulation, simple algorithms).
 
-### Phase 3 — Type system (`v0.4`)
+### Phase 3 — Type system (`v0.4`) 🟡
 *Catch errors before runtime.*
 
-- A typed AST/HIR and a **type checker** with local **type inference**.
-- User-defined `struct`s; field access and construction.
-- `Result`-style error values or first-class `Option`/`Result` (decision spike).
-- Compile-time errors for type mismatches, arity, undefined names.
+- [x] Function **type annotations** (`fn f(x: int) -> bool`) and a dedicated **type-checking pass**, separate from codegen.
+- [x] Compile-time errors for type mismatches, arity, undefined names.
+- [ ] A typed AST/HIR with local **type inference**.
+- [ ] User-defined `struct`s; field access and construction.
+- [ ] `Result`-style error values or first-class `Option`/`Result` (decision spike).
 
 **Exit:** ill-typed programs are rejected with good messages; structs work end to end.
 
-### Phase 4 — Memory & runtime (`v0.5`)
+### Phase 4 — Memory & runtime (`v0.5`) 🟡
 *A model that lasts.*
 
-- **Research spike + RFC**: ownership/borrowing vs tracing GC vs ARC. Pick one and document why.
-- Implement the chosen model; heap allocation with deterministic cleanup or GC.
-- Begin the **standard library**: collections, strings, math, basic I/O.
-- Formalize the runtime (replace ad-hoc `printf` with a real runtime/stdlib boundary).
+- [x] A minimal heap runtime (`lumo_alloc`, malloc-backed) powering strings and arrays.
+- [~] **Research spike + RFC**: ownership/borrowing vs tracing GC vs ARC — RFC 0001 drafted; decision still open.
+- [ ] Implement the chosen model; memory **reclamation** (arena/regions) with deterministic cleanup or GC. *(Allocations currently leak.)*
+- [ ] Begin the **standard library**: collections, strings, math, basic I/O.
+- [ ] Formalize the runtime (replace ad-hoc `printf` with a real runtime/stdlib boundary).
 
 **Exit:** programs that allocate and free memory run without leaks under the chosen model.
 
@@ -133,13 +163,13 @@ no heap types (strings/arrays), no type checker, no test suite or CI.
 
 **Exit:** a generic, trait-based collection library is expressible in Lumo itself.
 
-### Phase 8 — Compiler scale (`v0.9`)
+### Phase 8 — Compiler scale (`v0.9`) 🟡
 *Stay fast as codebases grow.*
 
-- **Query-based, incremental** compilation (salsa-style): recompile only what changed.
-- **Parallel** front end across modules; on-disk caching of artifacts.
-- **Optimization**: drive LLVM pass pipelines (`mem2reg`, inlining, etc.); `-O0/-O2/-O3`.
-- **Benchmarks** with regression tracking (compile time + runtime).
+- [x] **Optimization**: drive LLVM pass pipelines via `-O0`..`-O3`. *(Landed early.)*
+- [ ] **Query-based, incremental** compilation (salsa-style): recompile only what changed.
+- [ ] **Parallel** front end across modules; on-disk caching of artifacts.
+- [ ] **Benchmarks** with regression tracking (compile time + runtime).
 
 **Exit:** incremental rebuilds of a large project are sub-second; benchmarks gate PRs.
 
@@ -202,11 +232,12 @@ These run continuously, not as one-off phases.
 
 ## Immediate next steps (next few PRs)
 
+Phases 1–2 and the typed front end are done (see [Progress so far](#progress-so-far)).
 The highest-leverage work right now, in order:
 
-1. **Spans + diagnostics** in the lexer/parser — unblocks every later error message.
-2. **Test harness + GitHub Actions CI** — make `main` always green.
-3. **`bool` and `float`** types — the first step away from `i64`-only.
-4. **A typed AST** — the foundation the type checker (Phase 3) needs.
+1. **Memory reclamation** — `lumo_alloc` allocations currently leak; design and
+   implement an arena/region scheme (or land the heap-model decision in RFC 0001).
+2. **`struct`s** — user-defined types, field access, and construction (Phase 3).
+3. **Local type inference** — reduce the annotation burden the checker requires today.
 
 Track progress on the GitHub issues/milestones for each phase.

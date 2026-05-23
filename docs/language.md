@@ -284,8 +284,9 @@ fn sum(ns: [int]) -> int {
 
 Arrays are heap-allocated (laid out as a length followed by the elements) and,
 like concatenated strings, are currently reclaimed only at program exit — see
-[RFC 0001](rfcs/0001-memory-model.md). **There is no bounds checking yet**:
-indexing out of range is undefined behavior.
+[RFC 0001](rfcs/0001-memory-model.md). Indexing is **bounds-checked**: an
+out-of-range index (including a negative one) prints `lumo: array index out of
+bounds` to stderr and exits with status 101.
 
 Execution starts at `fn main()`. The value `main` returns becomes the process
 exit code.

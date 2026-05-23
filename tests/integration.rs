@@ -283,3 +283,9 @@ fn err_index_nonarray() {
 fn err_array_mixed() {
     run_err("err_array_mixed", "E0200");
 }
+
+/// Out-of-bounds indexing is a runtime failure: non-zero exit + a message.
+#[test]
+fn oob_runtime_check() {
+    run_err("oob", "out of bounds");
+}
