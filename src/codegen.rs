@@ -303,6 +303,91 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_parse_runtime();
         // ファイル I/O（read_file/write_file）のランタイム。
         self.declare_io_runtime();
+        // 配列スライス（seq[lo:hi]）のランタイム。
+        self.declare_array_runtime();
+    }
+
+    /// 配列ランタイム。今は `lumo_array_slice` のみ。
+    fn declare_array_runtime(&mut self) {
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+
+        // --- ptr lumo_array_slice(ptr hdr, i64 lo, i64 hi): hdr[lo..hi] の新規配列 ---
+        // 呼び出し側が 0<=lo<=hi<=len を保証する。スロットは 8byte 固定なので
+        // memcpy 1 回で要素型を問わずコピーできる。
+        let slice_fn = self.module.add_function(
+            "lumo_array_slice",
+            ptr.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(slice_fn, "entry");
+            let copy_bb = self.ctx.append_basic_block(slice_fn, "copy");
+            let fin_bb = self.ctx.append_basic_block(slice_fn, "fin");
+            let hdr = slice_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let lo = slice_fn.get_nth_param(1).unwrap().into_int_value();
+            let hi = slice_fn.get_nth_param(2).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let memcpy = self.module.get_function("memcpy").unwrap();
+            let n = self.builder.build_int_sub(hi, lo, "n").unwrap();
+            let bytes = self
+                .builder
+                .build_int_mul(n, i64t.const_int(8, false), "bytes")
+                .unwrap();
+            // 新ヘッダ(24byte)を確保し len=cap=n、data を確保
+            let newhdr = self
+                .builder
+                .build_call(alloc, &[i64t.const_int(24, false).into()], "newhdr")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let newdata = self
+                .builder
+                .build_call(alloc, &[bytes.into()], "newdata")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder.build_store(newhdr, n).unwrap();
+            self.builder
+                .build_store(self.hdr_field(newhdr, 8), n)
+                .unwrap();
+            self.builder
+                .build_store(self.hdr_field(newhdr, 16), newdata)
+                .unwrap();
+            // n>0 のときだけ memcpy（null+0 の UB を避ける）
+            let has = self
+                .builder
+                .build_int_compare(IntPredicate::SGT, n, i64t.const_zero(), "has")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(has, copy_bb, fin_bb)
+                .unwrap();
+            self.builder.position_at_end(copy_bb);
+            let olddata = self
+                .builder
+                .build_load(ptr, self.hdr_field(hdr, 16), "olddata")
+                .unwrap()
+                .into_pointer_value();
+            let off = self
+                .builder
+                .build_int_mul(lo, i64t.const_int(8, false), "off")
+                .unwrap();
+            let src = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, olddata, &[off], "src")
+                    .unwrap()
+            };
+            self.builder
+                .build_call(memcpy, &[newdata.into(), src.into(), bytes.into()], "")
+                .unwrap();
+            self.builder.build_unconditional_branch(fin_bb).unwrap();
+            self.builder.position_at_end(fin_bb);
+            self.builder.build_return(Some(&newhdr)).unwrap();
+        }
     }
 
     /// ファイル I/O のランタイム（read_file/write_file）。libc の fopen 系を使う。
@@ -3709,6 +3794,60 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_store(hdr, newlen).unwrap();
                 (hdr.into(), arr_ty)
             }
+            ExprKind::Call { name, args } if name == "pop" => {
+                // pop(a): 末尾要素を取り除いて返す。len を1減らすだけ（data はそのまま）。
+                let i64t = self.ctx.i64_type();
+                let ptr = self.ctx.ptr_type(AddressSpace::default());
+                let (arr_v, arr_ty) = self.gen_expr(&args[0]);
+                let Type::Array(elem) = arr_ty else {
+                    unreachable!("typeck guarantees an array here");
+                };
+                let hdr = arr_v.into_pointer_value();
+                self.null_check(hdr);
+                let len = self
+                    .builder
+                    .build_load(i64t, hdr, "len")
+                    .unwrap()
+                    .into_int_value();
+                // 空配列からの pop は実行時エラー
+                let empty = self
+                    .builder
+                    .build_int_compare(IntPredicate::EQ, len, i64t.const_zero(), "empty")
+                    .unwrap();
+                let function = self.cur_function();
+                let fail_bb = self.ctx.append_basic_block(function, "pop.empty");
+                let ok_bb = self.ctx.append_basic_block(function, "pop.ok");
+                self.builder
+                    .build_conditional_branch(empty, fail_bb, ok_bb)
+                    .unwrap();
+                self.builder.position_at_end(fail_bb);
+                self.panic("lumo: pop from empty array\n", "pop_empty_msg");
+                self.builder.position_at_end(ok_bb);
+                let newlen = self
+                    .builder
+                    .build_int_sub(len, i64t.const_int(1, false), "newlen")
+                    .unwrap();
+                self.builder.build_store(hdr, newlen).unwrap();
+                let data = self
+                    .builder
+                    .build_load(ptr, self.hdr_field(hdr, 16), "data")
+                    .unwrap()
+                    .into_pointer_value();
+                let off = self
+                    .builder
+                    .build_int_mul(newlen, i64t.const_int(8, false), "off")
+                    .unwrap();
+                let slot = unsafe {
+                    self.builder
+                        .build_in_bounds_gep(self.ctx.i8_type(), data, &[off], "slot")
+                        .unwrap()
+                };
+                let v = self
+                    .builder
+                    .build_load(self.basic_ty(elem.to_type()), slot, "popped")
+                    .unwrap();
+                (v, elem.to_type())
+            }
             ExprKind::Call { name, .. } if name == "read_line" => {
                 // stdin から1行読む。EOF なら null、そうでなければ末尾改行を取り除いた文字列。
                 let n = 4096u64;
@@ -3965,6 +4104,87 @@ impl<'ctx> CodeGen<'ctx> {
                         (self.slot_to_value(raw, velem.to_type()), velem.to_type())
                     }
                     _ => unreachable!("typeck guarantees an array, string, or map here"),
+                }
+            }
+            ExprKind::Slice { seq, lo, hi } => {
+                let i64t = self.ctx.i64_type();
+                let (sv, sty) = self.gen_expr(seq);
+                let base = sv.into_pointer_value();
+                self.null_check(base);
+                // 長さ: 配列はヘッダ先頭の i64、文字列は strlen
+                let len = match sty {
+                    Type::Array(_) => self
+                        .builder
+                        .build_load(i64t, base, "len")
+                        .unwrap()
+                        .into_int_value(),
+                    Type::Str => {
+                        let strlen = self.module.get_function("strlen").unwrap();
+                        self.builder
+                            .build_call(strlen, &[base.into()], "len")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic()
+                            .into_int_value()
+                    }
+                    _ => unreachable!("typeck guarantees array or string here"),
+                };
+                // lo 省略は 0、hi 省略は長さ
+                let lo_v = match lo {
+                    Some(e) => self.gen_expr(e).0.into_int_value(),
+                    None => i64t.const_zero(),
+                };
+                let hi_v = match hi {
+                    Some(e) => self.gen_expr(e).0.into_int_value(),
+                    None => len,
+                };
+                // 0 <= lo <= hi <= len を検査（外れたら panic）
+                let c1 = self
+                    .builder
+                    .build_int_compare(IntPredicate::SGE, lo_v, i64t.const_zero(), "c1")
+                    .unwrap();
+                let c2 = self
+                    .builder
+                    .build_int_compare(IntPredicate::SLE, lo_v, hi_v, "c2")
+                    .unwrap();
+                let c3 = self
+                    .builder
+                    .build_int_compare(IntPredicate::SLE, hi_v, len, "c3")
+                    .unwrap();
+                let ok12 = self.builder.build_and(c1, c2, "ok12").unwrap();
+                let ok = self.builder.build_and(ok12, c3, "ok").unwrap();
+                let function = self.cur_function();
+                let fail_bb = self.ctx.append_basic_block(function, "slice.fail");
+                let ok_bb = self.ctx.append_basic_block(function, "slice.ok");
+                self.builder
+                    .build_conditional_branch(ok, ok_bb, fail_bb)
+                    .unwrap();
+                self.builder.position_at_end(fail_bb);
+                self.panic("lumo: slice out of range\n", "slice_oob_msg");
+                self.builder.position_at_end(ok_bb);
+                match sty {
+                    Type::Array(_) => {
+                        let f = self.module.get_function("lumo_array_slice").unwrap();
+                        let r = self
+                            .builder
+                            .build_call(f, &[base.into(), lo_v.into(), hi_v.into()], "slice")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic();
+                        (r, sty)
+                    }
+                    Type::Str => {
+                        let count = self.builder.build_int_sub(hi_v, lo_v, "count").unwrap();
+                        let f = self.module.get_function("lumo_substr").unwrap();
+                        let r = self
+                            .builder
+                            .build_call(f, &[base.into(), lo_v.into(), count.into()], "sslice")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic();
+                        (r, Type::Str)
+                    }
+                    _ => unreachable!("typeck guarantees array or string here"),
                 }
             }
             ExprKind::MapLit(pairs) => {

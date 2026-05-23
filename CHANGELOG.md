@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.32.0]
+
+### Added
+
+- **Array `pop`.** `pop(a)` removes the last element of an array and returns it (typed as the element type), shrinking `a` in place. With `push` this makes an array a stack. Popping an empty array aborts at runtime (`lumo: pop from empty array`).
+- **Slicing `seq[lo:hi]`.** A new half-open slice on arrays and strings: an array slice is a fresh copy, a string slice a new string. Both bounds are optional — `lo` defaults to `0`, `hi` to the length (`a[:2]`, `a[3:]`, `a[:]`). Bounds-checked like `substr` (requires `0 <= lo <= hi <= len`, else `lumo: slice out of range`).
+- `examples/rpn.lum`: a reverse-Polish-notation calculator using `push`/`pop` as a stack.
+
+### Notes
+
+- A string slice is exactly `substr(s, lo, hi - lo)`; array slices copy the (8-byte) element slots with a single `memcpy`, so they work for any element type, nested collections included.
+
 ## [0.31.0]
 
 ### Added

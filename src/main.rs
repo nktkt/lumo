@@ -17,7 +17,7 @@ use diagnostics::Diagnostic;
 use std::process::exit;
 
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.31");
+    eprintln!("Lumo compiler 0.32");
     eprintln!("使い方:");
     eprintln!("  lumo <command> [-O0|-O1|-O2|-O3] <file.lum>");
     eprintln!();

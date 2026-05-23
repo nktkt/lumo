@@ -931,6 +931,28 @@ impl FnChecker<'_> {
                     return Ok(arr_ty);
                 }
 
+                // pop(a): 末尾要素を取り除いて返す（要素型）。空配列は実行時 panic。
+                if name == "pop" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "pop() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let arr_ty = self.check_expr(&args[0])?;
+                    let Type::Array(elem) = arr_ty else {
+                        return Err(Diagnostic::error(format!(
+                            "pop() の第1引数は配列ですが {} が渡されました",
+                            arr_ty.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    };
+                    return Ok(elem.to_type());
+                }
+
                 let (param_types, ret) = {
                     let sig = self.sigs.get(name).ok_or_else(|| {
                         Diagnostic::error(format!("未定義の関数: {}", name))
@@ -1024,6 +1046,26 @@ impl FnChecker<'_> {
                     ))
                     .with_code("E0205")
                     .at(array.span)),
+                }
+            }
+            ExprKind::Slice { seq, lo, hi } => {
+                let seq_ty = self.check_expr(seq)?;
+                // 境界は省略可。書かれていれば int でなければならない。
+                if let Some(lo) = lo {
+                    expect(Type::Int, self.check_expr(lo)?, lo.span)?;
+                }
+                if let Some(hi) = hi {
+                    expect(Type::Int, self.check_expr(hi)?, hi.span)?;
+                }
+                // スライスの型は元の配列/文字列と同じ。
+                match seq_ty {
+                    Type::Array(_) | Type::Str => Ok(seq_ty),
+                    other => Err(Diagnostic::error(format!(
+                        "スライスできるのは配列・文字列だけですが {} が使われています",
+                        other.name()
+                    ))
+                    .with_code("E0205")
+                    .at(seq.span)),
                 }
             }
             ExprKind::StructLit { name, fields } => {
@@ -1128,6 +1170,7 @@ fn is_reserved_name(name: &str) -> bool {
             | "chr"
             | "read_line"
             | "push"
+            | "pop"
             | "sqrt"
             | "pow"
             | "abs"

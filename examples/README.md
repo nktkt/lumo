@@ -62,3 +62,4 @@ Listed from simplest to most advanced:
 | [`matrix.lum`](matrix.lum) | Nested collections — `[[int]]` matrices with 2D literals, chained indexing (`m[i][j]`), and growing rows with `push`, driving a full matrix-multiply. |
 | [`tags.lum`](tags.lum) | String methods — `split` a messy tag list, then `trim` + `to_lower` each piece, and answer membership (`==`) and substring (`contains`) queries. |
 | [`slug.lum`](slug.lum) | String rewriting — `replace` to swap spaces/strip punctuation and `repeat` to draw a title underline, building a "slugify" routine with `trim` + `to_lower`. |
+| [`rpn.lum`](rpn.lum) | Stack operations — `push`/`pop` to evaluate reverse-Polish-notation expressions, tokenized with `split` and parsed with `is_int`/`int`. |

@@ -1,0 +1,39 @@
+# A reverse-Polish-notation calculator built on push/pop as a stack.
+#
+# Tokens come space-separated: a number is pushed; an operator pops the top two
+# values, combines them, and pushes the result. At the end the stack holds the
+# answer. This is the natural home for pop(a) — it returns the last element and
+# shrinks the array in place, exactly what a stack needs.
+#
+#   cargo run -- run examples/rpn.lum
+#   ->  3 4 + 5 * = 35
+#      100 2 / 3 - = 47
+
+fn eval(expr: string) -> int {
+    let stack: [int] = [];
+    for (tok in split(expr, " ")) {
+        if (is_int(tok)) {
+            stack = push(stack, int(tok));
+        } else {
+            # operator: pop right then left (order matters for - and /)
+            let b = pop(stack);
+            let a = pop(stack);
+            let r = 0;
+            if (tok == "+") { r = a + b; }
+            if (tok == "-") { r = a - b; }
+            if (tok == "*") { r = a * b; }
+            if (tok == "/") { r = a / b; }
+            stack = push(stack, r);
+        }
+    }
+    return pop(stack);
+}
+
+fn main() {
+    let e1 = "3 4 + 5 *";                 # (3 + 4) * 5
+    print e1 + " = " + str(eval(e1));     # 35
+
+    let e2 = "100 2 / 3 -";               # (100 / 2) - 3
+    print e2 + " = " + str(eval(e2));     # 47
+    return 0;
+}

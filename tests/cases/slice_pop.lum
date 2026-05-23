@@ -1,0 +1,54 @@
+# Array/string slicing seq[lo:hi] (bounds optional) and array pop.
+
+fn show(xs: [int]) -> string {
+    let r = "";
+    for (let i = 0; i < len(xs); i = i + 1) {
+        if (i > 0) { r = r + ","; }
+        r = r + str(xs[i]);
+    }
+    return r;
+}
+
+fn main() {
+    let a = [10, 20, 30, 40, 50];
+
+    # array slices: [lo:hi], [:hi], [lo:], [:]
+    print show(a[1:3]);          # 20,30
+    print show(a[:2]);           # 10,20
+    print show(a[3:]);           # 40,50
+    print show(a[:]);            # 10,20,30,40,50
+    print len(a[2:2]);           # 0   (empty slice)
+    print len(a);                # 5   (original unchanged)
+
+    # a slice is an independent copy
+    let b = a[1:4];
+    b[0] = 999;
+    print a[1];                  # 20  (original intact)
+    print show(b);               # 999,30,40
+
+    # string slices reuse substr
+    print "hello"[1:4];          # ell
+    print "hello"[:2];           # he
+    print "hello"[2:];           # llo
+    print "hello"[:];            # hello
+    print "[" + "hello"[3:3] + "]";   # []
+
+    # slicing composes (slice of a slice)
+    print show(a[1:4][1:]);      # 30,40
+
+    # pop returns the last element and shrinks the array in place
+    let s = [1, 2, 3];
+    print pop(s);                # 3
+    print pop(s);                # 2
+    print len(s);                # 1
+    print s[0];                  # 1
+
+    # push + pop = a stack
+    s = push(s, 7);
+    s = push(s, 8);
+    print pop(s);                # 8
+    print pop(s);                # 7
+    print pop(s);                # 1
+    print len(s);                # 0
+    return 0;
+}
