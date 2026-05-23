@@ -122,7 +122,7 @@ fn main() {
 - **[docs/internals.md](docs/internals.md)** — compiler architecture (for contributors)
 - **[CHANGELOG.md](CHANGELOG.md)** — release history
 - **[ROADMAP.md](ROADMAP.md)** — the long-range plan
-- **[docs/rfcs/](docs/rfcs/)** — design RFCs (e.g. the memory-model proposal)
+- **[docs/rfcs/](docs/rfcs/)** — design RFCs (the memory-model proposal and the `map`-type proposal)
 
 ## Roadmap
 

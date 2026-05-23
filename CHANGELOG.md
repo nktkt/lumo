@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 ## [Unreleased]
 
-- _Nothing yet._
+- `docs/rfcs/0002-map-type.md`: a design RFC proposing a built-in associative `map` type (`{string: V}`), and `docs/rfcs/README.md` indexing the RFCs. Design only — no compiler change yet.
 
 ## [0.23.0]
 

@@ -23,7 +23,7 @@ What is implemented today — all merged to `main`, CI green, across PRs #1–#1
 - [x] **A minimal heap runtime** (`lumo_alloc`): string concatenation (`+`) and equality (`==` / `!=`); arrays (literals, bounds-checked indexing read/write, `len`).
 - [x] **Optimization:** LLVM optimization passes via `-O0`..`-O3`.
 - [x] **Backends:** JIT (`run`), native executable (`build`, links libc via clang), and `emit-ir`.
-- [x] **Docs:** a tutorial, a language reference, a compiler-internals guide, RFC 0001 (memory model), an examples catalog, and a CHANGELOG.
+- [x] **Docs:** a tutorial, a language reference, a compiler-internals guide, RFCs 0001 (memory model) and 0002 (map type), an examples catalog, and a CHANGELOG.
 
 Still open: memory reclamation, `struct`s, and modules. See
 [Immediate next steps](#immediate-next-steps-next-few-prs).
@@ -127,7 +127,7 @@ Status: ✅ done · 🟡 partial · ⬜ not started.
 - [x] A minimal heap runtime (`lumo_alloc`, malloc-backed) powering strings and arrays.
 - [~] **Research spike + RFC**: ownership/borrowing vs tracing GC vs ARC — RFC 0001 drafted; decision still open.
 - [ ] Implement the chosen model; memory **reclamation** (arena/regions) with deterministic cleanup or GC. *(Allocations currently leak.)*
-- [ ] Begin the **standard library**: collections, strings, math, basic I/O.
+- [ ] Begin the **standard library**: collections, strings, math, basic I/O. *(Arrays + `push` shipped; math built-ins shipped; an associative `map` type is designed in [RFC 0002](docs/rfcs/0002-map-type.md), pending review.)*
 - [ ] Formalize the runtime (replace ad-hoc `printf` with a real runtime/stdlib boundary).
 
 **Exit:** programs that allocate and free memory run without leaks under the chosen model.
