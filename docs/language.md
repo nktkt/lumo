@@ -8,8 +8,9 @@ stands.
 ## A Complete Example
 
 ```lumo
-# Approximate a square root with a fixed number of iterations.
-fn sqrt(x: float, steps: int) -> float {
+# Approximate a square root with Newton's method, a fixed number of steps.
+# (There is also a built-in `sqrt`; this just shows hand-written control flow.)
+fn newton_sqrt(x: float, steps: int) -> float {
     let guess = x;
     let i = 0;
     while (i < steps) {
@@ -23,7 +24,7 @@ fn main() {
     let n = 16.0;
     let positive = n > 0.0;
     if (positive) {
-        print sqrt(n, 10);
+        print newton_sqrt(n, 10);
     } else {
         print 0.0;
     }
@@ -430,8 +431,9 @@ print float(total) / float(count);  # 3.5  (float division)
 print int(3.9);                     # 3    (truncates)
 ```
 
-`int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, and `push`
-are reserved names — you cannot define a function with one of them.
+`int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`,
+`sqrt`, `pow`, `abs`, `min`, `max`, `floor`, and `ceil` are reserved names — you
+cannot define a function with one of them.
 
 ### `read_line`
 
@@ -504,6 +506,32 @@ let n = 42;
 print "answer = " + str(n);   # answer = 42
 print str(3.14);              # 3.14
 print str(true);              # true
+```
+
+### Math
+
+A handful of numeric built-ins:
+
+| Function     | Signature                  | Notes                                  |
+| ------------ | -------------------------- | -------------------------------------- |
+| `sqrt(x)`    | `float -> float`           | square root                            |
+| `pow(b, e)`  | `(float, float) -> float`  | `b` raised to the power `e`            |
+| `floor(x)`   | `float -> float`           | round down to a whole number           |
+| `ceil(x)`    | `float -> float`           | round up to a whole number             |
+| `abs(x)`     | `int -> int` / `float -> float` | absolute value (keeps the type)   |
+| `min(a, b)`  | numeric, both same type    | smaller of two `int`s or two `float`s  |
+| `max(a, b)`  | numeric, both same type    | larger of two `int`s or two `float`s   |
+
+```lumo
+print sqrt(2.0);                       # 1.41421
+print pow(2.0, 10.0);                  # 1024
+print abs(-7);                         # 7
+print max(min(5, 10), 3);             # 5
+
+# distance between two points
+let dx = 3.0;
+let dy = 4.0;
+print sqrt(pow(dx, 2.0) + pow(dy, 2.0));   # 5
 ```
 
 ## Diagnostics

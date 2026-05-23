@@ -1,0 +1,22 @@
+# Math built-ins: sqrt, pow, abs, min, max, floor, ceil.
+
+fn main() {
+    print sqrt(144.0);        # 12
+    print pow(2.0, 10.0);     # 1024
+    print floor(3.7);         # 3
+    print ceil(3.2);          # 4
+
+    print abs(-5);            # 5    (int -> int)
+    print abs(-2.5);          # 2.5  (float -> float)
+
+    print min(3, 8);          # 3
+    print max(3, 8);          # 8
+    print min(1.5, 0.5);      # 0.5
+    print max(1.5, 0.5);      # 1.5
+
+    # Pythagoras: a 3-4-5 right triangle.
+    let a = 3.0;
+    let b = 4.0;
+    print sqrt(pow(a, 2.0) + pow(b, 2.0));  # 5
+    return 0;
+}

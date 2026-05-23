@@ -60,23 +60,21 @@ fn main() {
 
 ### How do I find the maximum of an array of ints?
 
-Start with the first element, then compare each remaining element against the
-current best.
+Start with the first element, then fold the rest in with the built-in `max(a, b)`
+(use `min` for the smallest).
 
 ```lumo
-fn max(ns: [int]) -> int {
+fn largest(ns: [int]) -> int {
     let best = ns[0];
     for (let i = 1; i < len(ns); i = i + 1) {
-        if (ns[i] > best) {
-            best = ns[i];
-        }
+        best = max(best, ns[i]);
     }
     return best;
 }
 
 fn main() {
     let nums = [3, 9, 2, 14, 7];
-    print max(nums);    # 14
+    print largest(nums);    # 14
     return 0;
 }
 ```
