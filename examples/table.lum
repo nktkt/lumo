@@ -1,0 +1,18 @@
+# str() (Phase 15 / v0.15) — turn values into text and build messages.
+#
+# str(x) converts an int, float, or bool to a string (string passes through),
+# so you can mix numbers into output with `+`.
+
+fn main() {
+    print "Squares 1..5:";
+    for (let i = 1; i <= 5; i = i + 1) {
+        print "  " + str(i) + " * " + str(i) + " = " + str(i * i);
+    }
+
+    let avg = 10.0 / 3.0;
+    print "average ~ " + str(avg);
+
+    let ready = 3 > 1;
+    print "ready: " + str(ready);
+    return 0;
+}

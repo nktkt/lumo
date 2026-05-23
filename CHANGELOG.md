@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.15.0]
+
+### Added
+
+- `str(x)` built-in: converts `int` / `float` / `bool` to a `string` (a `string` passes through). With `+`, this lets you build text from values, e.g. `"answer = " + str(n)`.
+
 ## [0.14.0]
 
 ### Added

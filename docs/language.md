@@ -387,8 +387,8 @@ print float(total) / float(count);  # 3.5  (float division)
 print int(3.9);                     # 3    (truncates)
 ```
 
-`int`, `float`, `bool`, `string`, and `len` are reserved names — you cannot
-define a function with one of them.
+`int`, `float`, `bool`, `string`, `len`, and `str` are reserved names — you
+cannot define a function with one of them.
 
 ### `len`
 
@@ -398,6 +398,18 @@ an array (its number of elements).
 ```lumo
 print len("hello");     # 5
 print len([1, 2, 3]);   # 3
+```
+
+### `str`
+
+`str(x)` converts an `int`, `float`, or `bool` to a `string` (a `string` passes
+through unchanged). Combined with `+`, it lets you build text from values:
+
+```lumo
+let n = 42;
+print "answer = " + str(n);   # answer = 42
+print str(3.14);              # 3.14
+print str(true);              # true
 ```
 
 ## Diagnostics

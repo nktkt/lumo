@@ -160,6 +160,11 @@ fn linked_list() {
     run_ok("linked_list");
 }
 
+#[test]
+fn stringify() {
+    run_ok("stringify");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -329,4 +334,9 @@ fn null_deref_runtime_check() {
 #[test]
 fn err_let_null() {
     run_err("err_let_null", "E0208");
+}
+
+#[test]
+fn err_str_struct() {
+    run_err("err_str_struct", "E0200");
 }

@@ -179,6 +179,12 @@ impl<'ctx> CodeGen<'ctx> {
             i32t.fn_type(&[ptr.into(), ptr.into()], false),
             ext,
         );
+        // int snprintf(char* buf, i64 size, char* fmt, ...) — str() の数値→文字列に使う
+        self.module.add_function(
+            "snprintf",
+            i32t.fn_type(&[ptr.into(), i64t.into(), ptr.into()], true),
+            ext,
+        );
 
         // ヒープ確保のチョークポイント。今は malloc を呼ぶだけ（回収なし）。
         // 将来ここを arena/region アロケータに差し替える（RFC 0001）。
@@ -659,6 +665,50 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_load(self.ctx.i64_type(), ptr, "len")
                             .unwrap();
                         (n, Type::Int)
+                    }
+                }
+            }
+            ExprKind::Call { name, args } if name == "str" => {
+                let (v, ty) = self.gen_expr(&args[0]);
+                match ty {
+                    // string はそのまま
+                    Type::Str => (v, Type::Str),
+                    // bool は "true"/"false" を選ぶ
+                    Type::Bool => {
+                        let t = self.global_str("true", "str_true");
+                        let f = self.global_str("false", "str_false");
+                        let s = self
+                            .builder
+                            .build_select(v.into_int_value(), t, f, "boolstr")
+                            .unwrap();
+                        (s, Type::Str)
+                    }
+                    // int/float は snprintf でヒープバッファに書き出す
+                    _ => {
+                        let i64t = self.ctx.i64_type();
+                        let cap = i64t.const_int(32, false);
+                        let alloc = self.module.get_function("lumo_alloc").unwrap();
+                        let buf = self
+                            .builder
+                            .build_call(alloc, &[cap.into()], "strbuf")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic()
+                            .into_pointer_value();
+                        let fmt = if ty == Type::Float {
+                            self.global_str("%g", "fmt_float_g")
+                        } else {
+                            self.global_str("%lld", "fmt_int_d")
+                        };
+                        let snprintf = self.module.get_function("snprintf").unwrap();
+                        self.builder
+                            .build_call(
+                                snprintf,
+                                &[buf.into(), cap.into(), fmt.into(), v.into()],
+                                "",
+                            )
+                            .unwrap();
+                        (buf.into(), Type::Str)
                     }
                 }
             }

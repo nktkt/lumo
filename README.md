@@ -54,7 +54,7 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.14, in progress)
+## Language (v0.15, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
@@ -65,7 +65,7 @@ See **[docs/language.md](docs/language.md)** for the full reference, or
 - Arrays: `a[i]` read/write (bounds-checked), `len(a)`; heap-allocated, scalar elements
 - Structs: `struct Point { x: int, y: int }`, field access `p.x` (read/write), nestable
 - `null` for reference types (string/array/struct) → recursive data structures (linked lists, trees); null deref is caught at runtime
-- Numeric conversions via the `int(x)` / `float(x)` built-ins
+- Built-ins: `int(x)` / `float(x)` conversions, `len(x)`, `str(x)` (stringify int/float/bool for `+` building)
 - Variables are lexically block-scoped, with shadowing; optional type annotations (`let x: T = ...`)
 - Arithmetic: `+ - * /` on two ints or two floats, `%` (int only), unary minus `-x`
 - Comparison: `== != < <= > >=` (yields a `bool`)
