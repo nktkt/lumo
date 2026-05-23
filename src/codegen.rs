@@ -102,7 +102,7 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().into(),
             Type::Bool => self.ctx.bool_type().into(),
             Type::Float => self.ctx.f64_type().into(),
-            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Null => {
+            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Map(_) | Type::Null => {
                 self.ctx.ptr_type(AddressSpace::default()).into()
             }
         }
@@ -114,7 +114,7 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().const_int(0, false).into(),
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::Float => self.ctx.f64_type().const_float(0.0).into(),
-            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Null => self
+            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Map(_) | Type::Null => self
                 .ctx
                 .ptr_type(AddressSpace::default())
                 .const_null()
@@ -164,7 +164,7 @@ impl<'ctx> CodeGen<'ctx> {
         Ok(())
     }
 
-    fn declare_runtime(&self) {
+    fn declare_runtime(&mut self) {
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
         let ptr = self.ctx.ptr_type(AddressSpace::default());
@@ -178,6 +178,12 @@ impl<'ctx> CodeGen<'ctx> {
         let ext = Some(Linkage::External);
         self.module
             .add_function("malloc", ptr.fn_type(&[i64t.into()], false), ext);
+        // void* calloc(size_t n, size_t size) — map のゼロ初期化バケット配列に使う
+        self.module.add_function(
+            "calloc",
+            ptr.fn_type(&[i64t.into(), i64t.into()], false),
+            ext,
+        );
         // void* realloc(void* ptr, size_t size) — 配列を伸ばす push() に使う
         self.module.add_function(
             "realloc",
@@ -282,6 +288,720 @@ impl<'ctx> CodeGen<'ctx> {
             .build_call(exit_fn, &[i32t.const_int(101, false).into()], "")
             .unwrap();
         self.builder.build_unreachable().unwrap();
+
+        // map(連想配列)のランタイム。lumo_alloc/lumo_panic を使うのでこの後に定義する。
+        self.declare_map_runtime();
+    }
+
+    /// map のランタイム（分離連鎖ハッシュ表、RFC 0002）を IR で定義する。
+    ///
+    /// レイアウト:
+    ///   ヘッダ {i64 count@0, i64 nbuckets@8, ptr buckets@16}（map 値はこのポインタ）
+    ///   バケット = nbuckets 個の ptr（各チェーンの先頭、null 終端）
+    ///   エントリ {ptr key@0, i64 hash@8, i64 value@16, ptr next@24}
+    /// 値は配列スロットと同じく 8byte（int/float のビット列か参照ポインタ）なので、
+    /// この 1 つのランタイムが全ての値型に使える。v1 は nbuckets 固定（resize なし）。
+    fn declare_map_runtime(&mut self) {
+        let i64t = self.ctx.i64_type();
+        let i1t = self.ctx.bool_type();
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let nbuckets: u64 = 64;
+
+        // --- i64 lumo_str_hash(ptr key): FNV-1a ---
+        let hash_fn =
+            self.module
+                .add_function("lumo_str_hash", i64t.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(hash_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(hash_fn, "loop");
+            let body_bb = self.ctx.append_basic_block(hash_fn, "body");
+            let done_bb = self.ctx.append_basic_block(hash_fn, "done");
+            let key = hash_fn.get_nth_param(0).unwrap().into_pointer_value();
+            // h と i を alloca で持つ（mem2reg がレジスタ化する）
+            self.builder.position_at_end(entry);
+            let h = self.builder.build_alloca(i64t, "h").unwrap();
+            let i = self.builder.build_alloca(i64t, "i").unwrap();
+            self.builder
+                .build_store(h, i64t.const_int(14695981039346656037, false))
+                .unwrap();
+            self.builder.build_store(i, i64t.const_zero()).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // loop: c = key[i]; if c==0 -> done
+            self.builder.position_at_end(loop_bb);
+            let iv = self
+                .builder
+                .build_load(i64t, i, "i")
+                .unwrap()
+                .into_int_value();
+            let caddr = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), key, &[iv], "caddr")
+                    .unwrap()
+            };
+            let c = self
+                .builder
+                .build_load(self.ctx.i8_type(), caddr, "c")
+                .unwrap()
+                .into_int_value();
+            let is_nul = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, c, self.ctx.i8_type().const_zero(), "nul")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(is_nul, done_bb, body_bb)
+                .unwrap();
+            // body: h = (h ^ zext c) * prime; i++
+            self.builder.position_at_end(body_bb);
+            let hv = self
+                .builder
+                .build_load(i64t, h, "h")
+                .unwrap()
+                .into_int_value();
+            let c64 = self.builder.build_int_z_extend(c, i64t, "c64").unwrap();
+            let xored = self.builder.build_xor(hv, c64, "xor").unwrap();
+            let mixed = self
+                .builder
+                .build_int_mul(xored, i64t.const_int(1099511628211, false), "mix")
+                .unwrap();
+            self.builder.build_store(h, mixed).unwrap();
+            let inc = self
+                .builder
+                .build_int_add(iv, i64t.const_int(1, false), "inc")
+                .unwrap();
+            self.builder.build_store(i, inc).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // done: return h
+            self.builder.position_at_end(done_bb);
+            let hv = self.builder.build_load(i64t, h, "h").unwrap();
+            self.builder.build_return(Some(&hv)).unwrap();
+        }
+
+        // --- ptr lumo_map_new() ---
+        let new_fn = self
+            .module
+            .add_function("lumo_map_new", ptr.fn_type(&[], false), None);
+        {
+            let entry = self.ctx.append_basic_block(new_fn, "entry");
+            self.builder.position_at_end(entry);
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let hdr = self
+                .builder
+                .build_call(alloc, &[i64t.const_int(24, false).into()], "hdr")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder.build_store(hdr, i64t.const_zero()).unwrap();
+            self.builder
+                .build_store(self.hdr_field(hdr, 8), i64t.const_int(nbuckets, false))
+                .unwrap();
+            let calloc = self.module.get_function("calloc").unwrap();
+            let buckets = self
+                .builder
+                .build_call(
+                    calloc,
+                    &[
+                        i64t.const_int(nbuckets, false).into(),
+                        i64t.const_int(8, false).into(),
+                    ],
+                    "buckets",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder
+                .build_store(self.hdr_field(hdr, 16), buckets)
+                .unwrap();
+            self.builder.build_return(Some(&hdr)).unwrap();
+        }
+
+        // --- ptr lumo_map_find(ptr hdr, ptr key, i64 hash): エントリ or null ---
+        let find_fn = self.module.add_function(
+            "lumo_map_find",
+            ptr.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(find_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(find_fn, "loop");
+            let check_bb = self.ctx.append_basic_block(find_fn, "check");
+            let hit_bb = self.ctx.append_basic_block(find_fn, "hit");
+            let next_bb = self.ctx.append_basic_block(find_fn, "next");
+            let miss_bb = self.ctx.append_basic_block(find_fn, "miss");
+            let hdr = find_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let key = find_fn.get_nth_param(1).unwrap().into_pointer_value();
+            let hash = find_fn.get_nth_param(2).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            // idx = hash u% nbuckets; e = buckets[idx]
+            let nb = self
+                .builder
+                .build_load(i64t, self.hdr_field(hdr, 8), "nb")
+                .unwrap()
+                .into_int_value();
+            let idx = self
+                .builder
+                .build_int_unsigned_rem(hash, nb, "idx")
+                .unwrap();
+            let buckets = self
+                .builder
+                .build_load(ptr, self.hdr_field(hdr, 16), "buckets")
+                .unwrap()
+                .into_pointer_value();
+            let off = self
+                .builder
+                .build_int_mul(idx, i64t.const_int(8, false), "off")
+                .unwrap();
+            let slot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), buckets, &[off], "slot")
+                    .unwrap()
+            };
+            let e_ptr = self.builder.build_alloca(ptr, "e").unwrap();
+            let head = self.builder.build_load(ptr, slot, "head").unwrap();
+            self.builder.build_store(e_ptr, head).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // loop: if e==null -> miss
+            self.builder.position_at_end(loop_bb);
+            let e = self
+                .builder
+                .build_load(ptr, e_ptr, "e")
+                .unwrap()
+                .into_pointer_value();
+            let is_null = self.builder.build_is_null(e, "isnull").unwrap();
+            self.builder
+                .build_conditional_branch(is_null, miss_bb, check_bb)
+                .unwrap();
+            // check: if e.hash==hash && strcmp(e.key,key)==0 -> hit
+            self.builder.position_at_end(check_bb);
+            let eh = self
+                .builder
+                .build_load(i64t, self.hdr_field(e, 8), "eh")
+                .unwrap()
+                .into_int_value();
+            let hash_eq = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, eh, hash, "heq")
+                .unwrap();
+            let strcmp_bb = self.ctx.append_basic_block(find_fn, "strcmp");
+            self.builder
+                .build_conditional_branch(hash_eq, strcmp_bb, next_bb)
+                .unwrap();
+            self.builder.position_at_end(strcmp_bb);
+            let ek = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 0), "ek")
+                .unwrap();
+            let strcmp = self.module.get_function("strcmp").unwrap();
+            let cmp = self
+                .builder
+                .build_call(strcmp, &[ek.into(), key.into()], "cmp")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let key_eq = self
+                .builder
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    cmp,
+                    self.ctx.i32_type().const_zero(),
+                    "keq",
+                )
+                .unwrap();
+            self.builder
+                .build_conditional_branch(key_eq, hit_bb, next_bb)
+                .unwrap();
+            // hit: return e
+            self.builder.position_at_end(hit_bb);
+            self.builder.build_return(Some(&e)).unwrap();
+            // next: e = e.next; loop
+            self.builder.position_at_end(next_bb);
+            let nx = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 24), "nx")
+                .unwrap();
+            self.builder.build_store(e_ptr, nx).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // miss: return null
+            self.builder.position_at_end(miss_bb);
+            self.builder.build_return(Some(&ptr.const_null())).unwrap();
+        }
+
+        // --- void lumo_map_put(ptr hdr, ptr key, i64 hash, i64 val) ---
+        let put_fn = self.module.add_function(
+            "lumo_map_put",
+            self.ctx
+                .void_type()
+                .fn_type(&[ptr.into(), ptr.into(), i64t.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(put_fn, "entry");
+            let update_bb = self.ctx.append_basic_block(put_fn, "update");
+            let insert_bb = self.ctx.append_basic_block(put_fn, "insert");
+            let hdr = put_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let key = put_fn.get_nth_param(1).unwrap().into_pointer_value();
+            let hash = put_fn.get_nth_param(2).unwrap().into_int_value();
+            let val = put_fn.get_nth_param(3).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let e = self
+                .builder
+                .build_call(find_fn, &[hdr.into(), key.into(), hash.into()], "e")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let found = self.builder.build_is_not_null(e, "found").unwrap();
+            self.builder
+                .build_conditional_branch(found, update_bb, insert_bb)
+                .unwrap();
+            // update: e.value = val; ret
+            self.builder.position_at_end(update_bb);
+            self.builder
+                .build_store(self.hdr_field(e, 16), val)
+                .unwrap();
+            self.builder.build_return(None).unwrap();
+            // insert: ne = alloc(32); fill; prepend to bucket; count++
+            self.builder.position_at_end(insert_bb);
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let ne = self
+                .builder
+                .build_call(alloc, &[i64t.const_int(32, false).into()], "ne")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder
+                .build_store(self.hdr_field(ne, 0), key)
+                .unwrap();
+            self.builder
+                .build_store(self.hdr_field(ne, 8), hash)
+                .unwrap();
+            self.builder
+                .build_store(self.hdr_field(ne, 16), val)
+                .unwrap();
+            let nb = self
+                .builder
+                .build_load(i64t, self.hdr_field(hdr, 8), "nb")
+                .unwrap()
+                .into_int_value();
+            let idx = self
+                .builder
+                .build_int_unsigned_rem(hash, nb, "idx")
+                .unwrap();
+            let buckets = self
+                .builder
+                .build_load(ptr, self.hdr_field(hdr, 16), "buckets")
+                .unwrap()
+                .into_pointer_value();
+            let off = self
+                .builder
+                .build_int_mul(idx, i64t.const_int(8, false), "off")
+                .unwrap();
+            let slot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), buckets, &[off], "slot")
+                    .unwrap()
+            };
+            let head = self.builder.build_load(ptr, slot, "head").unwrap();
+            self.builder
+                .build_store(self.hdr_field(ne, 24), head)
+                .unwrap();
+            self.builder.build_store(slot, ne).unwrap();
+            let cnt = self
+                .builder
+                .build_load(i64t, hdr, "cnt")
+                .unwrap()
+                .into_int_value();
+            let cnt1 = self
+                .builder
+                .build_int_add(cnt, i64t.const_int(1, false), "cnt1")
+                .unwrap();
+            self.builder.build_store(hdr, cnt1).unwrap();
+            self.builder.build_return(None).unwrap();
+        }
+
+        // --- i64 lumo_map_get(ptr hdr, ptr key, i64 hash): 無ければ panic ---
+        let get_fn = self.module.add_function(
+            "lumo_map_get",
+            i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(get_fn, "entry");
+            let ok_bb = self.ctx.append_basic_block(get_fn, "ok");
+            let miss_bb = self.ctx.append_basic_block(get_fn, "miss");
+            let hdr = get_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let key = get_fn.get_nth_param(1).unwrap().into_pointer_value();
+            let hash = get_fn.get_nth_param(2).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let e = self
+                .builder
+                .build_call(find_fn, &[hdr.into(), key.into(), hash.into()], "e")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let found = self.builder.build_is_not_null(e, "found").unwrap();
+            self.builder
+                .build_conditional_branch(found, ok_bb, miss_bb)
+                .unwrap();
+            self.builder.position_at_end(ok_bb);
+            let v = self
+                .builder
+                .build_load(i64t, self.hdr_field(e, 16), "v")
+                .unwrap();
+            self.builder.build_return(Some(&v)).unwrap();
+            self.builder.position_at_end(miss_bb);
+            self.panic("lumo: key not found\n", "key_not_found_msg");
+        }
+
+        // --- i1 lumo_map_has(ptr hdr, ptr key, i64 hash) ---
+        let has_fn = self.module.add_function(
+            "lumo_map_has",
+            i1t.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(has_fn, "entry");
+            let hdr = has_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let key = has_fn.get_nth_param(1).unwrap().into_pointer_value();
+            let hash = has_fn.get_nth_param(2).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let e = self
+                .builder
+                .build_call(find_fn, &[hdr.into(), key.into(), hash.into()], "e")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let found = self.builder.build_is_not_null(e, "found").unwrap();
+            self.builder.build_return(Some(&found)).unwrap();
+        }
+
+        // --- i64 lumo_map_len(ptr hdr) ---
+        let len_fn =
+            self.module
+                .add_function("lumo_map_len", i64t.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(len_fn, "entry");
+            let hdr = len_fn.get_nth_param(0).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let cnt = self.builder.build_load(i64t, hdr, "cnt").unwrap();
+            self.builder.build_return(Some(&cnt)).unwrap();
+        }
+
+        // --- void lumo_map_del(ptr hdr, ptr key, i64 hash): あれば連結から外す ---
+        let del_fn = self.module.add_function(
+            "lumo_map_del",
+            self.ctx
+                .void_type()
+                .fn_type(&[ptr.into(), ptr.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(del_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(del_fn, "loop");
+            let check_bb = self.ctx.append_basic_block(del_fn, "check");
+            let strcmp_bb = self.ctx.append_basic_block(del_fn, "strcmp");
+            let unlink_bb = self.ctx.append_basic_block(del_fn, "unlink");
+            let first_bb = self.ctx.append_basic_block(del_fn, "first");
+            let mid_bb = self.ctx.append_basic_block(del_fn, "mid");
+            let next_bb = self.ctx.append_basic_block(del_fn, "next");
+            let ret_bb = self.ctx.append_basic_block(del_fn, "ret");
+            let hdr = del_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let key = del_fn.get_nth_param(1).unwrap().into_pointer_value();
+            let hash = del_fn.get_nth_param(2).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let nb = self
+                .builder
+                .build_load(i64t, self.hdr_field(hdr, 8), "nb")
+                .unwrap()
+                .into_int_value();
+            let idx = self
+                .builder
+                .build_int_unsigned_rem(hash, nb, "idx")
+                .unwrap();
+            let buckets = self
+                .builder
+                .build_load(ptr, self.hdr_field(hdr, 16), "buckets")
+                .unwrap()
+                .into_pointer_value();
+            let off = self
+                .builder
+                .build_int_mul(idx, i64t.const_int(8, false), "off")
+                .unwrap();
+            let slot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), buckets, &[off], "slot")
+                    .unwrap()
+            };
+            let prev_ptr = self.builder.build_alloca(ptr, "prev").unwrap();
+            let e_ptr = self.builder.build_alloca(ptr, "e").unwrap();
+            self.builder
+                .build_store(prev_ptr, ptr.const_null())
+                .unwrap();
+            let head = self.builder.build_load(ptr, slot, "head").unwrap();
+            self.builder.build_store(e_ptr, head).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // loop: if e==null -> ret
+            self.builder.position_at_end(loop_bb);
+            let e = self
+                .builder
+                .build_load(ptr, e_ptr, "e")
+                .unwrap()
+                .into_pointer_value();
+            let is_null = self.builder.build_is_null(e, "isnull").unwrap();
+            self.builder
+                .build_conditional_branch(is_null, ret_bb, check_bb)
+                .unwrap();
+            // check: hash match?
+            self.builder.position_at_end(check_bb);
+            let eh = self
+                .builder
+                .build_load(i64t, self.hdr_field(e, 8), "eh")
+                .unwrap()
+                .into_int_value();
+            let hash_eq = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, eh, hash, "heq")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(hash_eq, strcmp_bb, next_bb)
+                .unwrap();
+            // strcmp
+            self.builder.position_at_end(strcmp_bb);
+            let ek = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 0), "ek")
+                .unwrap();
+            let strcmp = self.module.get_function("strcmp").unwrap();
+            let cmp = self
+                .builder
+                .build_call(strcmp, &[ek.into(), key.into()], "cmp")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let key_eq = self
+                .builder
+                .build_int_compare(
+                    IntPredicate::EQ,
+                    cmp,
+                    self.ctx.i32_type().const_zero(),
+                    "keq",
+                )
+                .unwrap();
+            self.builder
+                .build_conditional_branch(key_eq, unlink_bb, next_bb)
+                .unwrap();
+            // unlink: prev==null ? bucket head = e.next : prev.next = e.next ; count--
+            self.builder.position_at_end(unlink_bb);
+            let nx = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 24), "nx")
+                .unwrap();
+            let prev = self
+                .builder
+                .build_load(ptr, prev_ptr, "prev")
+                .unwrap()
+                .into_pointer_value();
+            let prev_null = self.builder.build_is_null(prev, "prevnull").unwrap();
+            let dec_bb = self.ctx.append_basic_block(del_fn, "dec");
+            self.builder
+                .build_conditional_branch(prev_null, first_bb, mid_bb)
+                .unwrap();
+            self.builder.position_at_end(first_bb);
+            self.builder.build_store(slot, nx).unwrap();
+            self.builder.build_unconditional_branch(dec_bb).unwrap();
+            self.builder.position_at_end(mid_bb);
+            self.builder
+                .build_store(self.hdr_field(prev, 24), nx)
+                .unwrap();
+            self.builder.build_unconditional_branch(dec_bb).unwrap();
+            // dec: count-- then return（取り除いたときだけ通る）
+            self.builder.position_at_end(dec_bb);
+            let cnt = self
+                .builder
+                .build_load(i64t, hdr, "cnt")
+                .unwrap()
+                .into_int_value();
+            let cnt1 = self
+                .builder
+                .build_int_sub(cnt, i64t.const_int(1, false), "cnt1")
+                .unwrap();
+            self.builder.build_store(hdr, cnt1).unwrap();
+            self.builder.build_unconditional_branch(ret_bb).unwrap();
+            // next: prev=e; e=e.next; loop
+            self.builder.position_at_end(next_bb);
+            self.builder.build_store(prev_ptr, e).unwrap();
+            let nx2 = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 24), "nx2")
+                .unwrap();
+            self.builder.build_store(e_ptr, nx2).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // ret: 見つからなかった場合もここに来る
+            self.builder.position_at_end(ret_bb);
+            self.builder.build_return(None).unwrap();
+        }
+
+        // --- ptr lumo_map_keys(ptr hdr): 全キーを [string] 配列で返す ---
+        let keys_fn =
+            self.module
+                .add_function("lumo_map_keys", ptr.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(keys_fn, "entry");
+            let bloop = self.ctx.append_basic_block(keys_fn, "bloop");
+            let bbody = self.ctx.append_basic_block(keys_fn, "bbody");
+            let cloop = self.ctx.append_basic_block(keys_fn, "cloop");
+            let cbody = self.ctx.append_basic_block(keys_fn, "cbody");
+            let bnext = self.ctx.append_basic_block(keys_fn, "bnext");
+            let done = self.ctx.append_basic_block(keys_fn, "done");
+            let hdr = keys_fn.get_nth_param(0).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let cnt = self
+                .builder
+                .build_load(i64t, hdr, "cnt")
+                .unwrap()
+                .into_int_value();
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            // 配列ヘッダ {len,cap,data}（v0.22 と同じレイアウト）
+            let arr = self
+                .builder
+                .build_call(alloc, &[i64t.const_int(24, false).into()], "arr")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder.build_store(arr, cnt).unwrap();
+            self.builder
+                .build_store(self.hdr_field(arr, 8), cnt)
+                .unwrap();
+            let is_empty = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, cnt, i64t.const_zero(), "empty")
+                .unwrap();
+            let bytes = self
+                .builder
+                .build_int_mul(cnt, i64t.const_int(8, false), "bytes")
+                .unwrap();
+            let data_alloc = self
+                .builder
+                .build_call(alloc, &[bytes.into()], "data")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let data = self
+                .builder
+                .build_select(is_empty, ptr.const_null(), data_alloc, "data")
+                .unwrap()
+                .into_pointer_value();
+            self.builder
+                .build_store(self.hdr_field(arr, 16), data)
+                .unwrap();
+            // b=0, w=0
+            let b_ptr = self.builder.build_alloca(i64t, "b").unwrap();
+            let w_ptr = self.builder.build_alloca(i64t, "w").unwrap();
+            let e_ptr = self.builder.build_alloca(ptr, "e").unwrap();
+            self.builder.build_store(b_ptr, i64t.const_zero()).unwrap();
+            self.builder.build_store(w_ptr, i64t.const_zero()).unwrap();
+            let nb = self
+                .builder
+                .build_load(i64t, self.hdr_field(hdr, 8), "nb")
+                .unwrap()
+                .into_int_value();
+            let buckets = self
+                .builder
+                .build_load(ptr, self.hdr_field(hdr, 16), "buckets")
+                .unwrap()
+                .into_pointer_value();
+            self.builder.build_unconditional_branch(bloop).unwrap();
+            // bloop: if b>=nb done
+            self.builder.position_at_end(bloop);
+            let bv = self
+                .builder
+                .build_load(i64t, b_ptr, "b")
+                .unwrap()
+                .into_int_value();
+            let b_done = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, bv, nb, "bdone")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(b_done, done, bbody)
+                .unwrap();
+            // bbody: e = buckets[b]
+            self.builder.position_at_end(bbody);
+            let boff = self
+                .builder
+                .build_int_mul(bv, i64t.const_int(8, false), "boff")
+                .unwrap();
+            let bslot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), buckets, &[boff], "bslot")
+                    .unwrap()
+            };
+            let head = self.builder.build_load(ptr, bslot, "head").unwrap();
+            self.builder.build_store(e_ptr, head).unwrap();
+            self.builder.build_unconditional_branch(cloop).unwrap();
+            // cloop: if e==null -> bnext
+            self.builder.position_at_end(cloop);
+            let e = self
+                .builder
+                .build_load(ptr, e_ptr, "e")
+                .unwrap()
+                .into_pointer_value();
+            let e_null = self.builder.build_is_null(e, "enull").unwrap();
+            self.builder
+                .build_conditional_branch(e_null, bnext, cbody)
+                .unwrap();
+            // cbody: data[w] = e.key; w++; e = e.next
+            self.builder.position_at_end(cbody);
+            let wv = self
+                .builder
+                .build_load(i64t, w_ptr, "w")
+                .unwrap()
+                .into_int_value();
+            let woff = self
+                .builder
+                .build_int_mul(wv, i64t.const_int(8, false), "woff")
+                .unwrap();
+            let waddr = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), data, &[woff], "waddr")
+                    .unwrap()
+            };
+            let k = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 0), "k")
+                .unwrap();
+            self.builder.build_store(waddr, k).unwrap();
+            let w1 = self
+                .builder
+                .build_int_add(wv, i64t.const_int(1, false), "w1")
+                .unwrap();
+            self.builder.build_store(w_ptr, w1).unwrap();
+            let nx = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 24), "nx")
+                .unwrap();
+            self.builder.build_store(e_ptr, nx).unwrap();
+            self.builder.build_unconditional_branch(cloop).unwrap();
+            // bnext: b++
+            self.builder.position_at_end(bnext);
+            let b1 = self
+                .builder
+                .build_int_add(bv, i64t.const_int(1, false), "b1")
+                .unwrap();
+            self.builder.build_store(b_ptr, b1).unwrap();
+            self.builder.build_unconditional_branch(bloop).unwrap();
+            // done: return arr
+            self.builder.position_at_end(done);
+            self.builder.build_return(Some(&arr)).unwrap();
+        }
     }
 
     /// `lumo_panic(msg, len)` を呼んで unreachable で締める（現在のブロックを終端する）。
@@ -380,16 +1100,37 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_store(alloca, v).unwrap();
             }
             StmtKind::Assign { target, value } => {
-                let (v, _) = self.gen_expr(value);
+                let (v, vty) = self.gen_expr(value);
                 match &target.kind {
                     ExprKind::Var(name) => {
                         let (ptr, _) = self.lookup_var(name);
                         self.builder.build_store(ptr, v).unwrap();
                     }
                     ExprKind::Index { array, index } => {
-                        let (arr, _) = self.gen_expr(array);
-                        let addr = self.elem_addr(arr.into_pointer_value(), index);
-                        self.builder.build_store(addr, v).unwrap();
+                        let (arr, arr_ty) = self.gen_expr(array);
+                        match arr_ty {
+                            // map への代入: m[k] = v -> lumo_map_put
+                            Type::Map(_) => {
+                                let hdr = arr.into_pointer_value();
+                                self.null_check(hdr);
+                                let (kv, _) = self.gen_expr(index);
+                                let key = kv.into_pointer_value();
+                                let h = self.str_hash(key);
+                                let raw = self.to_slot_i64(v, vty);
+                                let put = self.module.get_function("lumo_map_put").unwrap();
+                                self.builder
+                                    .build_call(
+                                        put,
+                                        &[hdr.into(), key.into(), h.into(), raw.into()],
+                                        "",
+                                    )
+                                    .unwrap();
+                            }
+                            _ => {
+                                let addr = self.elem_addr(arr.into_pointer_value(), index);
+                                self.builder.build_store(addr, v).unwrap();
+                            }
+                        }
                     }
                     ExprKind::Field { obj, field } => {
                         let (ov, oty) = self.gen_expr(obj);
@@ -434,8 +1175,8 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_call(printf, &[fmt.into(), s.into()], "printf_call")
                             .unwrap();
                     }
-                    Type::Array(_) | Type::Struct(_) | Type::Null => {
-                        unreachable!("typeck forbids printing arrays/structs/null")
+                    Type::Array(_) | Type::Struct(_) | Type::Map(_) | Type::Null => {
+                        unreachable!("typeck forbids printing arrays/structs/maps/null")
                     }
                 }
             }
@@ -809,6 +1550,7 @@ impl<'ctx> CodeGen<'ctx> {
                             .unwrap_basic();
                         (n, Type::Int)
                     }
+                    // 配列・map とも長さ/要素数は先頭ヘッダの i64（同じオフセット0）
                     _ => {
                         let n = self
                             .builder
@@ -817,6 +1559,49 @@ impl<'ctx> CodeGen<'ctx> {
                         (n, Type::Int)
                     }
                 }
+            }
+            ExprKind::Call { name, args } if name == "has" => {
+                let (mv, _) = self.gen_expr(&args[0]);
+                let hdr = mv.into_pointer_value();
+                self.null_check(hdr);
+                let (kv, _) = self.gen_expr(&args[1]);
+                let key = kv.into_pointer_value();
+                let h = self.str_hash(key);
+                let f = self.module.get_function("lumo_map_has").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[hdr.into(), key.into(), h.into()], "has")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Bool)
+            }
+            ExprKind::Call { name, args } if name == "delete" => {
+                let (mv, _) = self.gen_expr(&args[0]);
+                let hdr = mv.into_pointer_value();
+                self.null_check(hdr);
+                let (kv, _) = self.gen_expr(&args[1]);
+                let key = kv.into_pointer_value();
+                let h = self.str_hash(key);
+                let f = self.module.get_function("lumo_map_del").unwrap();
+                self.builder
+                    .build_call(f, &[hdr.into(), key.into(), h.into()], "")
+                    .unwrap();
+                // 文として使う想定。式の値は便宜上 int 0。
+                (self.ctx.i64_type().const_zero().into(), Type::Int)
+            }
+            ExprKind::Call { name, args } if name == "keys" => {
+                let (mv, _) = self.gen_expr(&args[0]);
+                let hdr = mv.into_pointer_value();
+                self.null_check(hdr);
+                let f = self.module.get_function("lumo_map_keys").unwrap();
+                let arr = self
+                    .builder
+                    .build_call(f, &[hdr.into()], "keys")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (arr, Type::Array(crate::types::Elem::Str))
             }
             ExprKind::Call { name, args } if name == "push" => {
                 // push(arr, x): 末尾に x を追加し、配列(ヘッダ)を返す。容量が足りなければ
@@ -1150,8 +1935,52 @@ impl<'ctx> CodeGen<'ctx> {
                             .unwrap();
                         (v.into(), Type::Int)
                     }
-                    _ => unreachable!("typeck guarantees an array or string here"),
+                    // map の添字: キーで lumo_map_get（無ければ実行時 panic）
+                    Type::Map(velem) => {
+                        let hdr = arr.into_pointer_value();
+                        self.null_check(hdr);
+                        let (kv, _) = self.gen_expr(index);
+                        let key = kv.into_pointer_value();
+                        let h = self.str_hash(key);
+                        let getf = self.module.get_function("lumo_map_get").unwrap();
+                        let raw = self
+                            .builder
+                            .build_call(getf, &[hdr.into(), key.into(), h.into()], "mget")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic()
+                            .into_int_value();
+                        (self.slot_to_value(raw, velem.to_type()), velem.to_type())
+                    }
+                    _ => unreachable!("typeck guarantees an array, string, or map here"),
                 }
+            }
+            ExprKind::MapLit(pairs) => {
+                // 空ヘッダを作り、各ペアを put する。値型は最初のペアから（空は注釈で決まる）
+                let new = self.module.get_function("lumo_map_new").unwrap();
+                let hdr = self
+                    .builder
+                    .build_call(new, &[], "map")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+                let put = self.module.get_function("lumo_map_put").unwrap();
+                let mut velem = Type::Int; // 空のときの仮置き（Let が注釈型で上書き）
+                for (i, (k, v)) in pairs.iter().enumerate() {
+                    let (kv, _) = self.gen_expr(k);
+                    let key = kv.into_pointer_value();
+                    let (vv, vty) = self.gen_expr(v);
+                    if i == 0 {
+                        velem = vty;
+                    }
+                    let h = self.str_hash(key);
+                    let raw = self.to_slot_i64(vv, vty);
+                    self.builder
+                        .build_call(put, &[hdr.into(), key.into(), h.into(), raw.into()], "")
+                        .unwrap();
+                }
+                (hdr.into(), Type::Map(velem.as_elem().unwrap()))
             }
             ExprKind::StructLit { name, fields } => {
                 let (st, def) = self.structs[name].clone();
@@ -1436,6 +2265,64 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.position_at_end(fail_bb);
         self.panic("lumo: index out of bounds\n", "oob_msg");
         self.builder.position_at_end(ok_bb);
+    }
+
+    /// 型付きの値を map ランタイムの 8byte スロット(i64)へ詰める。
+    /// int=そのまま, bool=zext, float=bitcast, 参照=ptrtoint。
+    fn to_slot_i64(&self, v: BasicValueEnum<'ctx>, ty: Type) -> inkwell::values::IntValue<'ctx> {
+        let i64t = self.ctx.i64_type();
+        match ty {
+            Type::Int => v.into_int_value(),
+            Type::Bool => self
+                .builder
+                .build_int_z_extend(v.into_int_value(), i64t, "b2i")
+                .unwrap(),
+            Type::Float => self
+                .builder
+                .build_bit_cast(v.into_float_value(), i64t, "f2i")
+                .unwrap()
+                .into_int_value(),
+            _ => self
+                .builder
+                .build_ptr_to_int(v.into_pointer_value(), i64t, "p2i")
+                .unwrap(),
+        }
+    }
+
+    /// 8byte スロット(i64)を型 `ty` の値へ戻す（[`to_slot_i64`] の逆）。
+    fn slot_to_value(
+        &self,
+        raw: inkwell::values::IntValue<'ctx>,
+        ty: Type,
+    ) -> BasicValueEnum<'ctx> {
+        match ty {
+            Type::Int => raw.into(),
+            Type::Bool => self
+                .builder
+                .build_int_truncate(raw, self.ctx.bool_type(), "i2b")
+                .unwrap()
+                .into(),
+            Type::Float => self
+                .builder
+                .build_bit_cast(raw, self.ctx.f64_type(), "i2f")
+                .unwrap(),
+            _ => self
+                .builder
+                .build_int_to_ptr(raw, self.ctx.ptr_type(AddressSpace::default()), "i2p")
+                .unwrap()
+                .into(),
+        }
+    }
+
+    /// 文字列ポインタのハッシュ値（map のキー用、`lumo_str_hash` 呼び出し）。
+    fn str_hash(&self, key: PointerValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+        let hashf = self.module.get_function("lumo_str_hash").unwrap();
+        self.builder
+            .build_call(hashf, &[key.into()], "h")
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_int_value()
     }
 
     /// 配列ヘッダ `{len@0, cap@8, data@16}` の `byte_off` バイト目のフィールドアドレス。

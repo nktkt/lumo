@@ -45,7 +45,10 @@ pub enum Type {
     /// ユーザー定義の構造体（名前で参照。ヒープ確保したポインタ）。
     /// 名前は `intern` でリークして `&'static str` にし、`Copy` を保つ。
     Struct(&'static str),
-    /// `null` リテラルの型。参照型（string/array/struct）と互換。
+    /// 連想配列 `{string: V}`。キーは string 固定、値の型は `Elem`（v1 はスカラ/構造体）。
+    /// ヒープ確保したハッシュ表ヘッダへのポインタ（RFC 0002）。
+    Map(Elem),
+    /// `null` リテラルの型。参照型（string/array/struct/map）と互換。
     Null,
 }
 
@@ -58,6 +61,7 @@ impl Type {
             Type::Str => "string".to_string(),
             Type::Array(e) => format!("[{}]", e.name()),
             Type::Struct(n) => n.to_string(),
+            Type::Map(v) => format!("{{string: {}}}", v.name()),
             Type::Null => "null".to_string(),
         }
     }
@@ -69,7 +73,10 @@ impl Type {
 
     /// ヒープ上のポインタで表される参照型か（null を代入できる先）。
     pub fn is_reference(self) -> bool {
-        matches!(self, Type::Str | Type::Array(_) | Type::Struct(_))
+        matches!(
+            self,
+            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Map(_)
+        )
     }
 
     /// 配列の要素型として使えるスカラ型なら、その `Elem` を返す。
@@ -80,8 +87,8 @@ impl Type {
             Type::Float => Some(Elem::Float),
             Type::Str => Some(Elem::Str),
             Type::Struct(n) => Some(Elem::Struct(n)),
-            // 配列の配列・null は要素型にできない
-            Type::Array(_) | Type::Null => None,
+            // 配列の配列・map・null は要素型/値型にできない（v1）
+            Type::Array(_) | Type::Map(_) | Type::Null => None,
         }
     }
 }

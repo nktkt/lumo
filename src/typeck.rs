@@ -25,6 +25,7 @@ fn validate_type(t: Type, structs: &Structs, span: Span) -> Result<(), Diagnosti
     let struct_name = match t {
         Type::Struct(n) => Some(n),
         Type::Array(crate::types::Elem::Struct(n)) => Some(n),
+        Type::Map(crate::types::Elem::Struct(n)) => Some(n),
         _ => None,
     };
     if let Some(n) = struct_name {
@@ -181,23 +182,27 @@ impl FnChecker<'_> {
     fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), Diagnostic> {
         match &stmt.kind {
             StmtKind::Let { name, ty, value } => {
-                // 空配列リテラル `[]` は要素型を推論できないので、配列型の注釈があるときだけ許可する
-                // （可変長配列を空から始める唯一の手段: `let xs: [int] = [];`）。
-                if matches!(&value.kind, ExprKind::Array(els) if els.is_empty()) {
-                    let declared = match ty {
-                        Some(a) if matches!(a, Type::Array(_)) => {
-                            validate_type(*a, self.structs, stmt.span)?;
-                            *a
-                        }
-                        _ => {
-                            return Err(Diagnostic::error(
-                                "空の配列リテラル `[]` には配列型の注釈が必要です（例 `let xs: [int] = [];`）",
-                            )
-                            .with_code("E0206")
-                            .at(value.span));
-                        }
-                    };
-                    self.declare(name, declared);
+                // 空の `[]` / `{}` リテラルは要素・値型を推論できないので、対応する型注釈が
+                // あるときだけ許可する（空から始める唯一の手段: `let xs: [int] = [];`,
+                // `let m: {string: int} = {};`）。
+                let empty_array = matches!(&value.kind, ExprKind::Array(els) if els.is_empty());
+                let empty_map = matches!(&value.kind, ExprKind::MapLit(ps) if ps.is_empty());
+                if empty_array || empty_map {
+                    let ok = ty.is_some_and(|a| {
+                        (empty_array && matches!(a, Type::Array(_)))
+                            || (empty_map && matches!(a, Type::Map(_)))
+                    });
+                    if !ok {
+                        let what = if empty_array {
+                            "空の配列リテラル `[]` には配列型の注釈が必要です（例 `let xs: [int] = [];`）"
+                        } else {
+                            "空の map リテラル `{}` には map 型の注釈が必要です（例 `let m: {string: int} = {};`）"
+                        };
+                        return Err(Diagnostic::error(what).with_code("E0206").at(value.span));
+                    }
+                    let a = ty.unwrap();
+                    validate_type(a, self.structs, stmt.span)?;
+                    self.declare(name, a);
                     return Ok(());
                 }
                 let t = self.check_expr(value)?;
@@ -499,15 +504,83 @@ impl FnChecker<'_> {
                         .at(e.span));
                     }
                     let at = self.check_expr(&args[0])?;
-                    if !matches!(at, Type::Str | Type::Array(_)) {
+                    if !matches!(at, Type::Str | Type::Array(_) | Type::Map(_)) {
                         return Err(Diagnostic::error(format!(
-                            "len() は string か配列に使えますが {} が渡されました",
+                            "len() は string・配列・map に使えますが {} が渡されました",
                             at.name()
                         ))
                         .with_code("E0200")
                         .at(args[0].span));
                     }
                     return Ok(Type::Int);
+                }
+
+                // 組み込み has(map, key): キーが存在するか -> bool
+                if name == "has" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "has() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let mt = self.check_expr(&args[0])?;
+                    if !matches!(mt, Type::Map(_)) {
+                        return Err(Diagnostic::error(format!(
+                            "has() の第1引数は map ですが {} が渡されました",
+                            mt.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Bool);
+                }
+
+                // 組み込み delete(map, key): キーがあれば取り除く（無くてもエラーにしない）
+                if name == "delete" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "delete() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let mt = self.check_expr(&args[0])?;
+                    if !matches!(mt, Type::Map(_)) {
+                        return Err(Diagnostic::error(format!(
+                            "delete() の第1引数は map ですが {} が渡されました",
+                            mt.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Int); // 文として使う想定（戻り値は便宜上 int）
+                }
+
+                // 組み込み keys(map): キー一覧を [string] で返す（順序は未定義）
+                if name == "keys" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "keys() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let mt = self.check_expr(&args[0])?;
+                    if !matches!(mt, Type::Map(_)) {
+                        return Err(Diagnostic::error(format!(
+                            "keys() の引数は map ですが {} が渡されました",
+                            mt.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    return Ok(Type::Array(crate::types::Elem::Str));
                 }
 
                 // 組み込み read_line(): stdin から1行読む。EOF では null。型は string。
@@ -719,16 +792,50 @@ impl FnChecker<'_> {
                 }
                 Ok(Type::Array(elem))
             }
+            ExprKind::MapLit(pairs) => {
+                // 空の map リテラルは値型を推論できないので不可（Let で注釈付きのみ許可）
+                let (k0, v0) = pairs.first().ok_or_else(|| {
+                    Diagnostic::error("空の map リテラルは書けません（値型を推論できません）")
+                        .with_code("E0206")
+                        .at(e.span)
+                })?;
+                expect(Type::Str, self.check_expr(k0)?, k0.span)?;
+                let val_ty = self.check_expr(v0)?;
+                let v = val_ty.as_elem().ok_or_else(|| {
+                    Diagnostic::error(format!(
+                        "map の値にできるのは int/bool/float/string/構造体です（{} は不可）",
+                        val_ty.name()
+                    ))
+                    .with_code("E0206")
+                    .at(v0.span)
+                })?;
+                // 残りのキー(string)・値(同じ型)を検査
+                for (k, val) in &pairs[1..] {
+                    expect(Type::Str, self.check_expr(k)?, k.span)?;
+                    expect(val_ty, self.check_expr(val)?, val.span)?;
+                }
+                Ok(Type::Map(v))
+            }
             ExprKind::Index { array, index } => {
                 let arr_ty = self.check_expr(array)?;
                 let it = self.check_expr(index)?;
-                expect(Type::Int, it, index.span)?;
                 match arr_ty {
-                    Type::Array(elem) => Ok(elem.to_type()),
+                    Type::Array(elem) => {
+                        expect(Type::Int, it, index.span)?;
+                        Ok(elem.to_type())
+                    }
                     // 文字列の添字は i 番目のバイトを int で返す
-                    Type::Str => Ok(Type::Int),
+                    Type::Str => {
+                        expect(Type::Int, it, index.span)?;
+                        Ok(Type::Int)
+                    }
+                    // map の添字はキー(string)で引いて値型を返す
+                    Type::Map(v) => {
+                        expect(Type::Str, it, index.span)?;
+                        Ok(v.to_type())
+                    }
                     other => Err(Diagnostic::error(format!(
-                        "添字でアクセスできるのは配列か文字列だけですが {} が使われています",
+                        "添字でアクセスできるのは配列・文字列・map だけですが {} が使われています",
                         other.name()
                     ))
                     .with_code("E0205")
@@ -844,6 +951,9 @@ fn is_reserved_name(name: &str) -> bool {
             | "max"
             | "floor"
             | "ceil"
+            | "has"
+            | "keys"
+            | "delete"
     )
 }
 

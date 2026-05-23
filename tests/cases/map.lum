@@ -1,0 +1,45 @@
+# Maps: literals, indexed get/put, has, len, delete.
+
+fn main() {
+    # literal + get
+    let ages = {"alice": 30, "bob": 25};
+    print ages["alice"];          # 30
+    print len(ages);              # 2
+
+    # put: insert and overwrite
+    ages["carol"] = 40;
+    ages["bob"] = 26;
+    print ages["bob"];            # 26
+    print ages["carol"];          # 40
+    print len(ages);              # 3
+
+    # has
+    print has(ages, "alice");     # true
+    print has(ages, "dave");      # false
+
+    # build an empty map up (word count)
+    let counts: {string: int} = {};
+    let ws = ["a", "b", "a", "c", "a", "b"];
+    for (let i = 0; i < len(ws); i = i + 1) {
+        let w = ws[i];
+        if (has(counts, w)) {
+            counts[w] = counts[w] + 1;
+        } else {
+            counts[w] = 1;
+        }
+    }
+    print counts["a"];            # 3
+    print counts["b"];            # 2
+    print counts["c"];            # 1
+
+    # delete
+    delete(counts, "b");
+    print has(counts, "b");       # false
+    print len(counts);            # 2
+
+    # string-valued map
+    let cap: {string: string} = {};
+    cap["jp"] = "Tokyo";
+    print cap["jp"];              # Tokyo
+    return 0;
+}

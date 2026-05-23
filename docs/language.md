@@ -37,7 +37,7 @@ code `0` (the value returned by `main`).
 
 ## Types
 
-Lumo has four primitive types and two compound types:
+Lumo has four primitive types and three compound types:
 
 - `int` — 64-bit signed integer
 - `bool` — either `true` or `false`
@@ -45,6 +45,7 @@ Lumo has four primitive types and two compound types:
 - `string` — an immutable text value
 - `[T]` — an array of `T`, where `T` is `int`, `bool`, `float`, `string`, or a
   struct (see [Arrays](#arrays))
+- `{string: V}` — a map from string keys to values of type `V` (see [Maps](#maps))
 - a user-defined `struct` (see [Structs](#structs))
 
 There are **no implicit conversions** between types. An `int` is never
@@ -332,6 +333,42 @@ reclaimed only at program exit — see [RFC 0001](rfcs/0001-memory-model.md).
 Indexing is **bounds-checked**: an out-of-range index (including a negative one)
 prints `lumo: index out of bounds` to stderr and exits with status 101.
 
+## Maps
+
+A map (associative array) type is written `{string: V}`. **Keys are always
+`string`**; the value type `V` may be a scalar (`int`, `bool`, `float`,
+`string`) or a struct. (Array- and map-valued maps are not supported yet — see
+[RFC 0002](rfcs/0002-map-type.md).)
+
+- **Literal:** `{"a": 1, "b": 2}` — keys are string expressions, values all the
+  same type (inferred). The **empty literal `{}`** needs a map annotation, like
+  `[]`: `let m: {string: int} = {};`.
+- **Read:** `m[k]` returns the value for key `k`. **A missing key aborts** at
+  runtime (`lumo: key not found`, exit 101) — guard with `has` first.
+- **Write:** `m[k] = v;` inserts or overwrites (mutates in place; visible through
+  aliases, since a map value points at a stable header).
+- **`has(m, k)`** → `bool`; **`len(m)`** → number of entries; **`delete(m, k)`**
+  removes a key if present; **`keys(m)`** → a fresh `[string]` of the keys in
+  **unspecified order**.
+
+```lumo
+# count word frequencies
+let counts: {string: int} = {};
+let words = ["a", "b", "a"];
+for (let i = 0; i < len(words); i = i + 1) {
+    let w = words[i];
+    if (has(counts, w)) { counts[w] = counts[w] + 1; } else { counts[w] = 1; }
+}
+print counts["a"];          # 2
+print len(counts);          # 2
+
+let ks = keys(counts);      # ["a", "b"] in some order
+```
+
+Maps are backed by a separately-chained hash table (FNV-1a hashing). The bucket
+count is currently fixed (no resize yet), and entries — like all heap data — are
+reclaimed only at program exit (RFC 0001).
+
 ## Structs
 
 Declare a struct at the top level (alongside functions):
@@ -432,8 +469,8 @@ print int(3.9);                     # 3    (truncates)
 ```
 
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`,
-`sqrt`, `pow`, `abs`, `min`, `max`, `floor`, and `ceil` are reserved names — you
-cannot define a function with one of them.
+`sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, and `delete`
+are reserved names — you cannot define a function with one of them.
 
 ### `read_line`
 
@@ -474,8 +511,8 @@ print upper("hi");   # HI
 
 ### `len`
 
-`len(x)` returns, as an `int`, the length of a `string` (its number of bytes) or
-an array (its number of elements).
+`len(x)` returns, as an `int`, the length of a `string` (its number of bytes),
+an array (its number of elements), or a map (its number of entries).
 
 ```lumo
 print len("hello");     # 5
@@ -495,6 +532,12 @@ xs = push(xs, 1);
 xs = push(xs, 2);
 print len(xs);          # 2
 ```
+
+### `has` / `delete` / `keys`
+
+Map operations: `has(m, k)` tests membership (`bool`), `delete(m, k)` removes a
+key if present, and `keys(m)` returns the keys as a `[string]` (unspecified
+order). See [Maps](#maps).
 
 ### `str`
 
