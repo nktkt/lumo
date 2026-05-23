@@ -181,6 +181,25 @@ impl FnChecker<'_> {
     fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), Diagnostic> {
         match &stmt.kind {
             StmtKind::Let { name, ty, value } => {
+                // 空配列リテラル `[]` は要素型を推論できないので、配列型の注釈があるときだけ許可する
+                // （可変長配列を空から始める唯一の手段: `let xs: [int] = [];`）。
+                if matches!(&value.kind, ExprKind::Array(els) if els.is_empty()) {
+                    let declared = match ty {
+                        Some(a) if matches!(a, Type::Array(_)) => {
+                            validate_type(*a, self.structs, stmt.span)?;
+                            *a
+                        }
+                        _ => {
+                            return Err(Diagnostic::error(
+                                "空の配列リテラル `[]` には配列型の注釈が必要です（例 `let xs: [int] = [];`）",
+                            )
+                            .with_code("E0206")
+                            .at(value.span));
+                        }
+                    };
+                    self.declare(name, declared);
+                    return Ok(());
+                }
                 let t = self.check_expr(value)?;
                 let declared = match ty {
                     Some(a) => {
@@ -541,6 +560,40 @@ impl FnChecker<'_> {
                     return Ok(Type::Str);
                 }
 
+                // 組み込み push(arr, x): 配列末尾に要素を追加し、その配列を返す
+                if name == "push" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "push() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let arr_ty = self.check_expr(&args[0])?;
+                    let Type::Array(elem) = arr_ty else {
+                        return Err(Diagnostic::error(format!(
+                            "push() の第1引数は配列ですが {} が渡されました",
+                            arr_ty.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    };
+                    let xt = self.check_expr(&args[1])?;
+                    let et = elem.to_type();
+                    // 要素型に一致する値（参照型の要素には null も可）
+                    if xt != et && !(xt == Type::Null && et.is_reference()) {
+                        return Err(Diagnostic::error(format!(
+                            "push(): {} の配列に {} は追加できません",
+                            et.name(),
+                            xt.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[1].span));
+                    }
+                    return Ok(arr_ty);
+                }
+
                 let (param_types, ret) = {
                     let sig = self.sigs.get(name).ok_or_else(|| {
                         Diagnostic::error(format!("未定義の関数: {}", name))
@@ -697,7 +750,7 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
 fn is_reserved_name(name: &str) -> bool {
     matches!(
         name,
-        "int" | "float" | "bool" | "string" | "len" | "str" | "chr" | "read_line"
+        "int" | "float" | "bool" | "string" | "len" | "str" | "chr" | "read_line" | "push"
     )
 }
 

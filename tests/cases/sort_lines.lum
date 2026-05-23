@@ -1,0 +1,33 @@
+# Read every line of stdin into a growable array, sort it, and print it.
+# This is the capstone of read_line() + push() + string ordering: it handles
+# an unknown number of inputs, which fixed-size literals could never do.
+
+fn main() {
+    let lines: [string] = [];
+    let line = read_line();
+    while (line != null) {
+        lines = push(lines, line);
+        line = read_line();
+    }
+
+    # insertion sort (lexicographic, via string `>`)
+    let i = 1;
+    let n = len(lines);
+    while (i < n) {
+        let key = lines[i];
+        let j = i - 1;
+        while (j >= 0 && lines[j] > key) {
+            lines[j + 1] = lines[j];
+            j = j - 1;
+        }
+        lines[j + 1] = key;
+        i = i + 1;
+    }
+
+    let k = 0;
+    while (k < n) {
+        print lines[k];
+        k = k + 1;
+    }
+    return 0;
+}

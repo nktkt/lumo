@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.22.0]
+
+### Added
+
+- **Growable arrays.** `push(a, x)` appends an element and returns the array (`a = push(a, x);`), growing the backing storage via `realloc` as needed. The empty-array literal `[]` is now allowed when a `let` annotation supplies the type (`let xs: [int] = [];`), so an array can be built up from nothing — e.g. collecting an unknown number of `read_line()` inputs and sorting them.
+
+### Changed
+
+- Arrays are now represented as a `{len, cap, data}` header pointing at a separate data block (previously a single `[len][elements]` block). Because the header pointer is stable, `push` growth is visible through every alias of an array (no use-after-free when `realloc` moves the data).
+
 ## [0.21.0]
 
 ### Added

@@ -1,0 +1,32 @@
+# Growable arrays: push() appends and grows capacity (realloc) as needed.
+
+fn main() {
+    # Start empty and grow: capacity goes 0 -> 4 -> 8 under the hood.
+    let xs: [int] = [];
+    let i = 0;
+    while (i < 10) {
+        xs = push(xs, i * i);
+        i = i + 1;
+    }
+    print len(xs);            # 10
+
+    let sum = 0;
+    let j = 0;
+    while (j < len(xs)) {
+        sum = sum + xs[j];
+        j = j + 1;
+    }
+    print sum;                # 285
+
+    # Aliases share one header, so a push (even one that reallocates the
+    # backing data) stays visible through every alias - no use-after-free.
+    let a = [1, 2];
+    let b = a;
+    a = push(a, 3);
+    a = push(a, 4);
+    print len(b);             # 4
+    print b[2] + b[3];        # 7
+    b[0] = 99;
+    print a[0];               # 99
+    return 0;
+}

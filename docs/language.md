@@ -284,10 +284,12 @@ fn odd(n: int) -> bool {
 An array type is written `[T]` where `T` is `int`, `bool`, `float`, `string`, or
 a struct (e.g. `[Point]`). Arrays of arrays are not supported yet.
 
-- **Literal:** `[e1, e2, ...]` — at least one element, all the same type. The
-  element type is inferred. (There is no empty-array literal yet.)
+- **Literal:** `[e1, e2, ...]` — elements all the same type; the element type is
+  inferred. The **empty literal `[]`** is allowed only when a `let` gives the
+  array type, e.g. `let xs: [int] = [];` — that's how you start a growable array.
 - **Index:** `a[i]` reads, `a[i] = v;` writes. The index is an `int`.
 - **Length:** `len(a)` returns the number of elements as an `int`.
+- **Grow:** `push(a, x)` appends `x` and returns the array (see below).
 
 ```lumo
 let xs = [10, 20, 30];
@@ -304,11 +306,30 @@ fn sum(ns: [int]) -> int {
 }
 ```
 
-Arrays are heap-allocated (laid out as a length followed by the elements) and,
-like concatenated strings, are currently reclaimed only at program exit — see
-[RFC 0001](rfcs/0001-memory-model.md). Indexing is **bounds-checked**: an
-out-of-range index (including a negative one) prints `lumo: array index out of
-bounds` to stderr and exits with status 101.
+### Growable arrays: `push`
+
+`push(a, x)` appends `x` to array `a` (the types must match) and returns the
+array, so the common pattern is `a = push(a, x);`. Arrays grow automatically —
+start from `[]` and push as many elements as you like, which is what you need to
+collect an unknown number of inputs:
+
+```lumo
+let xs: [int] = [];
+for (let i = 0; i < 5; i = i + 1) {
+    xs = push(xs, i * i);
+}
+print len(xs);      # 5  -> [0, 1, 4, 9, 16]
+```
+
+Under the hood an array is a small header `{len, cap, data}`; `push` doubles the
+`data` block (via `realloc`) when it fills up. Because the header is what an
+array value points to, growth stays visible through every alias of the array —
+`let b = a; a = push(a, x);` leaves `b` seeing the new element too.
+
+Arrays are heap-allocated and, like concatenated strings, are currently
+reclaimed only at program exit — see [RFC 0001](rfcs/0001-memory-model.md).
+Indexing is **bounds-checked**: an out-of-range index (including a negative one)
+prints `lumo: index out of bounds` to stderr and exits with status 101.
 
 ## Structs
 
@@ -409,8 +430,8 @@ print float(total) / float(count);  # 3.5  (float division)
 print int(3.9);                     # 3    (truncates)
 ```
 
-`int`, `float`, `bool`, `string`, `len`, `str`, `chr`, and `read_line` are
-reserved names — you cannot define a function with one of them.
+`int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, and `push`
+are reserved names — you cannot define a function with one of them.
 
 ### `read_line`
 
@@ -457,6 +478,20 @@ an array (its number of elements).
 ```lumo
 print len("hello");     # 5
 print len([1, 2, 3]);   # 3
+```
+
+### `push`
+
+`push(a, x)` appends `x` (whose type must match the array's element type) to
+array `a` and returns the array. Reassign the result — `a = push(a, x);` — and
+arrays grow on demand, so you can build one up from `[]`. See
+[Growable arrays](#growable-arrays-push).
+
+```lumo
+let xs: [int] = [];
+xs = push(xs, 1);
+xs = push(xs, 2);
+print len(xs);          # 2
 ```
 
 ### `str`

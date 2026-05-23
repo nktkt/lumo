@@ -228,6 +228,17 @@ fn read_line_stdin() {
     run_ok_stdin("read_line", "10\n20\n30\n5\n");
 }
 
+#[test]
+fn growable_arrays_push() {
+    run_ok("push");
+}
+
+/// Capstone: read an unknown number of lines, collect them with `push`, sort.
+#[test]
+fn sort_lines_stdin() {
+    run_ok_stdin("sort_lines", "pear\nbanana\napple\ncherry\nfig\nkiwi\n");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
