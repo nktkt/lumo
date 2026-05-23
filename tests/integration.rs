@@ -233,6 +233,11 @@ fn growable_arrays_push() {
     run_ok("push");
 }
 
+#[test]
+fn math_builtins() {
+    run_ok("math");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {

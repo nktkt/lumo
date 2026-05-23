@@ -4,7 +4,7 @@
 # scalars). Literals are `[a, b, c]`; index with `a[i]` (read or write); `len(a)`
 # gives the length. Arrays are heap-allocated (reclaimed at exit for now).
 
-fn max(xs: [int]) -> int {
+fn largest(xs: [int]) -> int {
     let best = xs[0];
     for (let i = 1; i < len(xs); i = i + 1) {
         if (xs[i] > best) {
@@ -17,7 +17,7 @@ fn max(xs: [int]) -> int {
 # in-place bubble sort, then print the sorted values
 fn main() {
     let xs = [5, 2, 8, 1, 9, 3];
-    print max(xs);                # 9
+    print largest(xs);            # 9
 
     let n = len(xs);
     for (let i = 0; i < n; i = i + 1) {

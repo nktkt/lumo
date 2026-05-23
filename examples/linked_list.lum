@@ -9,7 +9,7 @@ struct Node {
     next: Node,
 }
 
-fn push(head: Node, v: int) -> Node {
+fn prepend(head: Node, v: int) -> Node {
     return Node { val: v, next: head };
 }
 
@@ -34,8 +34,8 @@ fn reverse(head: Node) -> Node {
 }
 
 fn main() {
-    # build 1 -> 2 -> 3 (push prepends, so push in reverse)
-    let list = push(push(push(null, 3), 2), 1);
+    # build 1 -> 2 -> 3 (prepend adds to the front, so insert in reverse)
+    let list = prepend(prepend(prepend(null, 3), 2), 1);
     print_all(list);            # 1 2 3
     print_all(reverse(list));   # 3 2 1
     return 0;

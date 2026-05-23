@@ -1,0 +1,37 @@
+# Summary statistics over an array of floats, using the math built-ins
+# (sqrt, pow, min, max). Standard deviation is the headline: it needs sqrt.
+
+fn mean(xs: [float]) -> float {
+    let sum = 0.0;
+    for (let i = 0; i < len(xs); i = i + 1) {
+        sum = sum + xs[i];
+    }
+    return sum / float(len(xs));
+}
+
+fn stddev(xs: [float]) -> float {
+    let m = mean(xs);
+    let acc = 0.0;
+    for (let i = 0; i < len(xs); i = i + 1) {
+        acc = acc + pow(xs[i] - m, 2.0);
+    }
+    return sqrt(acc / float(len(xs)));
+}
+
+fn main() {
+    let xs = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+
+    let lo = xs[0];
+    let hi = xs[0];
+    for (let i = 1; i < len(xs); i = i + 1) {
+        lo = min(lo, xs[i]);
+        hi = max(hi, xs[i]);
+    }
+
+    print "n      = " + str(len(xs));
+    print "mean   = " + str(mean(xs));     # 5
+    print "stddev = " + str(stddev(xs));   # 2
+    print "min    = " + str(lo);           # 2
+    print "max    = " + str(hi);           # 9
+    return 0;
+}

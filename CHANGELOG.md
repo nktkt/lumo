@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.23.0]
+
+### Added
+
+- Math built-ins: `sqrt`, `pow`, `floor`, `ceil` (`float -> float`), plus `abs`, `min`, and `max` (which work on `int` or `float`, returning the same type). Most lower to hardware instructions via LLVM intrinsics; `pow` calls libm. This fills a long-standing gap — `float` has existed since 0.4 with no way to take a square root.
+
 ## [0.22.0]
 
 ### Added

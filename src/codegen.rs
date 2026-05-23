@@ -201,6 +201,24 @@ impl<'ctx> CodeGen<'ctx> {
             i32t.fn_type(&[ptr.into(), i64t.into(), ptr.into()], true),
             ext,
         );
+
+        // 数学組み込み: LLVM intrinsic は x86-64 ではハードウェア命令に落ちる(libm 不要)。
+        // pow だけは libm の関数を呼ぶ(JIT は printf 等と同様にプロセスのシンボルで解決)。
+        let f64t = self.ctx.f64_type();
+        let unary_f = f64t.fn_type(&[f64t.into()], false);
+        let binary_f = f64t.fn_type(&[f64t.into(), f64t.into()], false);
+        for name in [
+            "llvm.sqrt.f64",
+            "llvm.floor.f64",
+            "llvm.ceil.f64",
+            "llvm.fabs.f64",
+        ] {
+            self.module.add_function(name, unary_f, None);
+        }
+        for name in ["llvm.minnum.f64", "llvm.maxnum.f64"] {
+            self.module.add_function(name, binary_f, None);
+        }
+        self.module.add_function("pow", binary_f, ext);
         // read_line() 用: char* fgets(char*, int, FILE*)、i64 strcspn(char*, char*)、
         // および stdin (FILE*) のグローバル（シンボル名は OS で異なる）。
         self.module.add_function(
@@ -672,6 +690,108 @@ impl<'ctx> CodeGen<'ctx> {
                     (f.into(), Type::Float)
                 } else {
                     (v, Type::Float)
+                }
+            }
+            ExprKind::Call { name, args } if matches!(name.as_str(), "sqrt" | "floor" | "ceil") => {
+                // float -> float の単項数学関数（intrinsic 呼び出し）
+                let (v, _) = self.gen_expr(&args[0]);
+                let intr = match name.as_str() {
+                    "sqrt" => "llvm.sqrt.f64",
+                    "floor" => "llvm.floor.f64",
+                    "ceil" => "llvm.ceil.f64",
+                    _ => unreachable!(),
+                };
+                let f = self.module.get_function(intr).unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[v.into_float_value().into()], "m")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Float)
+            }
+            ExprKind::Call { name, args } if name == "pow" => {
+                // pow(base, exp): libm の pow を呼ぶ
+                let (b, _) = self.gen_expr(&args[0]);
+                let (e, _) = self.gen_expr(&args[1]);
+                let f = self.module.get_function("pow").unwrap();
+                let r = self
+                    .builder
+                    .build_call(
+                        f,
+                        &[b.into_float_value().into(), e.into_float_value().into()],
+                        "pow",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Float)
+            }
+            ExprKind::Call { name, args } if name == "abs" => {
+                // abs(x): float は llvm.fabs、int は select(x<0, -x, x)
+                let (v, ty) = self.gen_expr(&args[0]);
+                if ty == Type::Float {
+                    let f = self.module.get_function("llvm.fabs.f64").unwrap();
+                    let r = self
+                        .builder
+                        .build_call(f, &[v.into_float_value().into()], "abs")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .unwrap_basic();
+                    (r, Type::Float)
+                } else {
+                    let x = v.into_int_value();
+                    let neg = self.builder.build_int_neg(x, "neg").unwrap();
+                    let isneg = self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::SLT,
+                            x,
+                            self.ctx.i64_type().const_zero(),
+                            "isneg",
+                        )
+                        .unwrap();
+                    let r = self.builder.build_select(isneg, neg, x, "abs").unwrap();
+                    (r, Type::Int)
+                }
+            }
+            ExprKind::Call { name, args } if name == "min" || name == "max" => {
+                // min/max(a, b): float は llvm.minnum/maxnum、int は select
+                let (a, ty) = self.gen_expr(&args[0]);
+                let (b, _) = self.gen_expr(&args[1]);
+                let want_min = name == "min";
+                if ty == Type::Float {
+                    let intr = if want_min {
+                        "llvm.minnum.f64"
+                    } else {
+                        "llvm.maxnum.f64"
+                    };
+                    let f = self.module.get_function(intr).unwrap();
+                    let r = self
+                        .builder
+                        .build_call(
+                            f,
+                            &[a.into_float_value().into(), b.into_float_value().into()],
+                            "mm",
+                        )
+                        .unwrap()
+                        .try_as_basic_value()
+                        .unwrap_basic();
+                    (r, Type::Float)
+                } else {
+                    let av = a.into_int_value();
+                    let bv = b.into_int_value();
+                    let pred = if want_min {
+                        IntPredicate::SLT
+                    } else {
+                        IntPredicate::SGT
+                    };
+                    let cmp = self
+                        .builder
+                        .build_int_compare(pred, av, bv, "mmcmp")
+                        .unwrap();
+                    let r = self.builder.build_select(cmp, av, bv, "mm").unwrap();
+                    (r, Type::Int)
                 }
             }
             ExprKind::Call { name, args } if name == "len" => {

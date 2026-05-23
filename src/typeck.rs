@@ -560,6 +560,84 @@ impl FnChecker<'_> {
                     return Ok(Type::Str);
                 }
 
+                // 数学組み込み: sqrt/floor/ceil は float -> float
+                if matches!(name.as_str(), "sqrt" | "floor" | "ceil") {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は引数1個ですが {} 個渡されました",
+                            name,
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let at = self.check_expr(&args[0])?;
+                    expect(Type::Float, at, args[0].span)?;
+                    return Ok(Type::Float);
+                }
+
+                // 数学組み込み: pow(base, exp) は (float, float) -> float
+                if name == "pow" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "pow() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Float, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Float, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Float);
+                }
+
+                // 数学組み込み: abs(x) は int か float を取り、同じ型を返す
+                if name == "abs" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "abs() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let at = self.check_expr(&args[0])?;
+                    if !at.is_numeric() {
+                        return Err(Diagnostic::error(format!(
+                            "abs() は int か float を取りますが {} が渡されました",
+                            at.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    return Ok(at);
+                }
+
+                // 数学組み込み: min/max(a, b) は同じ数値型を2つ取り、その型を返す
+                if name == "min" || name == "max" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は引数2個ですが {} 個渡されました",
+                            name,
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let a = self.check_expr(&args[0])?;
+                    if !a.is_numeric() {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は int か float を取りますが {} が渡されました",
+                            name,
+                            a.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    expect(a, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(a);
+                }
+
                 // 組み込み push(arr, x): 配列末尾に要素を追加し、その配列を返す
                 if name == "push" {
                     if args.len() != 2 {
@@ -750,7 +828,22 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
 fn is_reserved_name(name: &str) -> bool {
     matches!(
         name,
-        "int" | "float" | "bool" | "string" | "len" | "str" | "chr" | "read_line" | "push"
+        "int"
+            | "float"
+            | "bool"
+            | "string"
+            | "len"
+            | "str"
+            | "chr"
+            | "read_line"
+            | "push"
+            | "sqrt"
+            | "pow"
+            | "abs"
+            | "min"
+            | "max"
+            | "floor"
+            | "ceil"
     )
 }
 

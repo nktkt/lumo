@@ -50,6 +50,7 @@ Listed from simplest to most advanced:
 | [`arrays.lum`](arrays.lum) | Array types `[int]` with literals, indexed read/write `a[i]`, and `len()` — a `max` helper and an in-place bubble sort. |
 | [`sort.lum`](sort.lum) | Lexicographic string ordering — `<` / `>` comparisons on strings driving an insertion sort over an array of fruit names. |
 | [`primes.lum`](primes.lum) | Growable arrays — starting from an empty literal (`let primes: [int] = [];`) and using the `push(a, x)` built-in to collect an unknown number of primes. |
+| [`stats.lum`](stats.lum) | The math built-ins — `mean` and standard deviation over a `[float]` using `sqrt`, `pow`, `min`, and `max`. |
 | [`cipher.lum`](cipher.lum) | The `chr()` built-in with string indexing `s[i]` and `+` — a Caesar cipher that shifts and rebuilds lowercase letters, then decrypts. |
 | [`structs.lum`](structs.lum) | Structs — `struct` declarations, `Name { field: value }` construction, `obj.field` read/write, nested struct-typed fields, and field mutation. |
 | [`points.lum`](points.lum) | Arrays of structs `[Point]` — indexing yields a reference, so `ps[i].x` reads and mutates in place while computing a centroid. |
