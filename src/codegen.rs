@@ -1145,7 +1145,8 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap();
                 (buf.into(), Type::Str)
             }
-            BinOp::Eq | BinOp::Ne => {
+            // 比較は strcmp の符号で行う（== != < <= > >=）
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 let strcmp = self.module.get_function("strcmp").unwrap();
                 let cmp = self
                     .builder
@@ -1155,14 +1156,18 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap_basic()
                     .into_int_value();
                 let zero = self.ctx.i32_type().const_int(0, false);
-                let pred = if matches!(op, BinOp::Eq) {
-                    IntPredicate::EQ
-                } else {
-                    IntPredicate::NE
+                let pred = match op {
+                    BinOp::Eq => IntPredicate::EQ,
+                    BinOp::Ne => IntPredicate::NE,
+                    BinOp::Lt => IntPredicate::SLT,
+                    BinOp::Le => IntPredicate::SLE,
+                    BinOp::Gt => IntPredicate::SGT,
+                    BinOp::Ge => IntPredicate::SGE,
+                    _ => unreachable!(),
                 };
                 let res = self
                     .builder
-                    .build_int_compare(pred, cmp, zero, "streq")
+                    .build_int_compare(pred, cmp, zero, "strcmp_res")
                     .unwrap();
                 (res.into(), Type::Bool)
             }

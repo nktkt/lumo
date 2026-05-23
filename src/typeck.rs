@@ -422,11 +422,15 @@ impl FnChecker<'_> {
                         Ok(Type::Bool)
                     }
                     BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                        // 大小比較は int 同士 / float 同士 -> bool
-                        if !lt.is_numeric() {
-                            return Err(numeric_required(lt, lhs.span));
+                        // 大小比較: int 同士 / float 同士 / string 同士(辞書順) -> bool
+                        if lt == Type::Str {
+                            expect(Type::Str, rt, rhs.span)?;
+                        } else {
+                            if !lt.is_numeric() {
+                                return Err(numeric_required(lt, lhs.span));
+                            }
+                            expect(lt, rt, rhs.span)?;
                         }
-                        expect(lt, rt, rhs.span)?;
                         Ok(Type::Bool)
                     }
                     BinOp::And | BinOp::Or => {

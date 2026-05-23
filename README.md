@@ -54,14 +54,14 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.20, in progress)
+## Language (v0.21, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
 
 - Types: `int` (64-bit), `bool`, `float` (64-bit), `string`, arrays `[T]`, and user-defined `struct`s — no implicit conversions
 - Literals: `42`, `true` / `false`, `3.14`, `"text"`, `[1, 2, 3]`, `Point { x: 1, y: 2 }`, `null`
-- Strings: `+` concatenates (heap-allocated), `==`/`!=` compare by value, `s[i]` reads a byte (bounds-checked)
+- Strings: `+` concatenates (heap-allocated), `== != < <= > >=` compare (lexicographic, so they sort), `s[i]` reads a byte (bounds-checked)
 - Arrays: `a[i]` read/write (bounds-checked), `len(a)`; elements can be scalars or structs (`[Point]`)
 - Structs: `struct Point { x: int, y: int }`, field access `p.x` (read/write), nestable
 - `null` for reference types (string/array/struct) → recursive data structures (linked lists, trees); null deref is caught at runtime

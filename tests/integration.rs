@@ -213,6 +213,11 @@ fn string_index() {
 }
 
 #[test]
+fn string_sort() {
+    run_ok("string_sort");
+}
+
+#[test]
 fn chr_builtin() {
     run_ok("chr");
 }

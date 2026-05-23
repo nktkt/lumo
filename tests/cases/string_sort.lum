@@ -1,0 +1,26 @@
+# string ordering (< <= > >=, lexicographic) and sorting an array of strings
+fn sort(words: [string]) {
+    let n = len(words);
+    for (let i = 0; i < n; i = i + 1) {
+        for (let j = 0; j < n - 1 - i; j = j + 1) {
+            if (words[j] > words[j + 1]) {
+                let tmp = words[j];
+                words[j] = words[j + 1];
+                words[j + 1] = tmp;
+            }
+        }
+    }
+}
+
+fn main() {
+    print "apple" < "banana";   # true
+    print "cherry" < "banana";  # false
+    print "abc" <= "abc";       # true
+
+    let w = ["banana", "apple", "cherry", "date", "apricot"];
+    sort(w);
+    for (let i = 0; i < len(w); i = i + 1) {
+        print w[i];             # apple apricot banana cherry date
+    }
+    return 0;
+}

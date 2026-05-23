@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.21.0]
+
+### Added
+
+- Lexicographic ordering comparisons on strings (`<`, `<=`, `>`, `>=`, via `strcmp`), so arrays of strings can be sorted.
+
 ## [0.20.0]
 
 ### Added
