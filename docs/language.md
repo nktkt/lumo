@@ -157,6 +157,10 @@ Defined for `int` only.
 let r = 10 % 3;      # 1
 ```
 
+Integer `/` and `%` by zero abort at runtime with `lumo: division by zero`
+(exit 101). Float division by zero follows IEEE rules (`1.0 / 0.0` is infinity),
+not an error.
+
 ### Comparison: `== != < <= > >=`
 
 Operate on two `int`s or two `float`s of the same type and produce a `bool`.

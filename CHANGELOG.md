@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.18.1]
+
+### Fixed
+
+- Integer division/modulo by zero now aborts cleanly (`lumo: division by zero`, exit 101) instead of triggering undefined behavior (a SIGFPE crash). Float division by zero is unaffected (IEEE infinity). Found by a code-review pass.
+
 ## [0.18.0]
 
 ### Added
