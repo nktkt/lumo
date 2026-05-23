@@ -1,0 +1,41 @@
+# String indexing (Phase 16 / v0.16) — read bytes with s[i].
+#
+# s[i] returns the i-th byte of a string as an int (bounds-checked). With len()
+# this enables text processing. Strings stay immutable: s[i] = ... is an error.
+
+fn is_digit(c: int) -> bool {
+    return c >= 48 && c <= 57;   # '0'..'9'
+}
+
+# Parse the leading non-negative integer in s (stops at the first non-digit).
+fn parse_int(s: string) -> int {
+    let n = 0;
+    for (let i = 0; i < len(s); i = i + 1) {
+        let c = s[i];
+        if (!is_digit(c)) {
+            return n;
+        }
+        n = n * 10 + (c - 48);
+    }
+    return n;
+}
+
+fn is_palindrome(s: string) -> bool {
+    let i = 0;
+    let j = len(s) - 1;
+    while (i < j) {
+        if (s[i] != s[j]) {
+            return false;
+        }
+        i = i + 1;
+        j = j - 1;
+    }
+    return true;
+}
+
+fn main() {
+    print parse_int("2026 is the year");   # 2026
+    print "level palindrome? " + str(is_palindrome("level"));   # true
+    print "lumo palindrome? " + str(is_palindrome("lumo"));     # false
+    return 0;
+}

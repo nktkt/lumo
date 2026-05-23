@@ -1,0 +1,27 @@
+# string indexing s[i] -> byte value (int), with len(); text processing
+fn parse_int(s: string) -> int {
+    let result = 0;
+    for (let i = 0; i < len(s); i = i + 1) {
+        result = result * 10 + (s[i] - 48);   # '0' is byte 48
+    }
+    return result;
+}
+
+fn count(s: string, c: int) -> int {
+    let n = 0;
+    for (let i = 0; i < len(s); i = i + 1) {
+        if (s[i] == c) {
+            n = n + 1;
+        }
+    }
+    return n;
+}
+
+fn main() {
+    print "ABC"[0];               # 65 ('A')
+    print "ABC"[2];               # 67 ('C')
+    print parse_int("12345");     # 12345
+    print parse_int("7") + 1;     # 8
+    print count("banana", 97);    # 'a' = 97 -> 3
+    return 0;
+}

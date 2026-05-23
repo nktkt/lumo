@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.16.0]
+
+### Added
+
+- String indexing `s[i]`: returns the i-th byte as an `int` (bounds-checked), enabling text processing together with `len` and `str`. Strings remain immutable, so `s[i] = ...` is a compile error (`E0207`).
+
+### Changed
+
+- The out-of-bounds runtime message is now `lumo: index out of bounds` (shared by arrays and strings).
+
 ## [0.15.0]
 
 ### Added

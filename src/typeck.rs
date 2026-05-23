@@ -207,6 +207,16 @@ impl FnChecker<'_> {
                 self.declare(name, declared);
             }
             StmtKind::Assign { target, value } => {
+                // 文字列はイミュータブル: s[i] = ... は不可
+                if let ExprKind::Index { array, .. } = &target.kind {
+                    if self.check_expr(array)? == Type::Str {
+                        return Err(Diagnostic::error(
+                            "文字列はイミュータブルです（要素を書き換えられません）",
+                        )
+                        .with_code("E0207")
+                        .at(target.span));
+                    }
+                }
                 // 左辺は変数か添字かフィールド（lvalue）。その型と右辺の型を一致させる。
                 let target_ty = match &target.kind {
                     ExprKind::Var(_) | ExprKind::Index { .. } | ExprKind::Field { .. } => {
@@ -547,8 +557,10 @@ impl FnChecker<'_> {
                 expect(Type::Int, it, index.span)?;
                 match arr_ty {
                     Type::Array(elem) => Ok(elem.to_type()),
+                    // 文字列の添字は i 番目のバイトを int で返す
+                    Type::Str => Ok(Type::Int),
                     other => Err(Diagnostic::error(format!(
-                        "添字でアクセスできるのは配列だけですが {} が使われています",
+                        "添字でアクセスできるのは配列か文字列だけですが {} が使われています",
                         other.name()
                     ))
                     .with_code("E0205")

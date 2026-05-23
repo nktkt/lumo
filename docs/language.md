@@ -58,6 +58,23 @@ build new ones: `+` **concatenates** two strings into a fresh heap string, and
 currently reclaimed only at program exit; see
 [RFC 0001](rfcs/0001-memory-model.md) for the planned memory management.
 
+You can read individual bytes with `s[i]`, which returns the i-th byte as an
+`int` (0–255), bounds-checked like an array. `len(s)` gives the byte length.
+Because strings are immutable, `s[i] = ...` is a compile error. Together with
+[`str`](#str) (build strings from values) this is enough for simple text
+processing:
+
+```lumo
+fn parse_int(s: string) -> int {
+    let n = 0;
+    for (let i = 0; i < len(s); i = i + 1) {
+        n = n * 10 + (s[i] - 48);   # '0' is byte 48
+    }
+    return n;
+}
+print parse_int("2026");   # 2026
+```
+
 ## Literals
 
 | Type     | Examples                 |
