@@ -42,6 +42,8 @@ pub enum ExprKind {
     Float(f64),
     Bool(bool),
     Str(String),
+    /// `null` リテラル（参照型と互換）
+    Null,
     Var(String),
     Unary {
         op: UnOp,
@@ -93,6 +95,8 @@ pub struct Stmt {
 pub enum StmtKind {
     Let {
         name: String,
+        /// 任意の型注釈 `let x: T = ...`。省略時は初期値から型を推論する。
+        ty: Option<Type>,
         value: Expr,
     },
     /// 代入。左辺 `target` は変数(`Var`)か添字(`Index`)。

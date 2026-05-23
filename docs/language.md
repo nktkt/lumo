@@ -319,6 +319,41 @@ same struct value alias the same data). Like other heap values they are
 reclaimed only at program exit; see [RFC 0001](rfcs/0001-memory-model.md).
 Arrays of structs are not supported yet.
 
+## null
+
+`null` is a value compatible with any **reference type** (`string`, an array, or
+a struct). It lets reference variables be "empty" — which, combined with a
+self-referential struct, gives recursive data structures like linked lists and
+trees.
+
+- Assign or pass `null` wherever a reference type is expected.
+- Compare with `==` / `!=`: `node == null`, `s != null`.
+- A bare `let x = null;` can't infer a type — give one: `let x: Node = null;`.
+- Reading a field or index through `null` is caught at runtime: it prints
+  `lumo: null reference` to stderr and exits with status 101.
+
+```lumo
+struct Node { val: int, next: Node }
+
+fn length(list: Node) -> int {
+    if (list == null) { return 0; }
+    return 1 + length(list.next);
+}
+
+let list = Node { val: 1, next: Node { val: 2, next: null } };
+print length(list);   # 2
+```
+
+### Variable type annotations
+
+A `let` may carry an explicit type — required when the initializer is `null`,
+optional otherwise:
+
+```lumo
+let prev: Node = null;
+let n: int = 0;
+```
+
 Execution starts at `fn main()`. The value `main` returns becomes the process
 exit code.
 
@@ -413,7 +448,7 @@ statement   = let_stmt
             | continue_stmt
             | expr_stmt ;
 
-let_stmt    = "let" ident "=" expr ";" ;
+let_stmt    = "let" ident [ ":" type ] "=" expr ";" ;
 assign_stmt = lvalue "=" expr ";" ;   (* lvalue is a variable or array index *)
 return_stmt = "return" expr ";" ;
 print_stmt  = "print" expr ";" ;
@@ -442,6 +477,7 @@ field_init  = ident ":" expr ;
 primary     = int_lit
             | float_lit
             | bool_lit
+            | null_lit
             | str_lit
             | array_lit
             | struct_lit
@@ -454,6 +490,7 @@ args        = expr { "," expr } ;
 int_lit     = digit { digit } ;
 float_lit   = digit { digit } "." digit { digit } ;
 bool_lit    = "true" | "false" ;
+null_lit    = "null" ;
 str_lit     = '"' { char | escape } '"' ;
 ident       = letter { letter | digit | "_" } ;
 ```

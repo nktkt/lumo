@@ -1,0 +1,42 @@
+# Linked lists with null (Phase 14 / v0.14)
+#
+# `null` is a value compatible with any reference type (string, array, struct).
+# Combined with a self-referential struct, it gives recursive data structures.
+# Dereferencing null is caught at runtime (prints an error and exits).
+
+struct Node {
+    val: int,
+    next: Node,
+}
+
+fn push(head: Node, v: int) -> Node {
+    return Node { val: v, next: head };
+}
+
+fn print_all(head: Node) {
+    let n = head;
+    while (n != null) {
+        print n.val;
+        n = n.next;
+    }
+}
+
+fn reverse(head: Node) -> Node {
+    let prev: Node = null;   # type annotation: a nullable Node
+    let cur = head;
+    while (cur != null) {
+        let nxt = cur.next;
+        cur.next = prev;
+        prev = cur;
+        cur = nxt;
+    }
+    return prev;
+}
+
+fn main() {
+    # build 1 -> 2 -> 3 (push prepends, so push in reverse)
+    let list = push(push(push(null, 3), 2), 1);
+    print_all(list);            # 1 2 3
+    print_all(reverse(list));   # 3 2 1
+    return 0;
+}

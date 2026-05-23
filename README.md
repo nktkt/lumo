@@ -54,18 +54,19 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.13, in progress)
+## Language (v0.14, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
 
 - Types: `int` (64-bit), `bool`, `float` (64-bit), `string`, arrays `[T]`, and user-defined `struct`s — no implicit conversions
-- Literals: `42`, `true` / `false`, `3.14`, `"text"`, `[1, 2, 3]`, `Point { x: 1, y: 2 }`
+- Literals: `42`, `true` / `false`, `3.14`, `"text"`, `[1, 2, 3]`, `Point { x: 1, y: 2 }`, `null`
 - Strings: `+` concatenates (heap-allocated), `==`/`!=` compare by value
 - Arrays: `a[i]` read/write (bounds-checked), `len(a)`; heap-allocated, scalar elements
 - Structs: `struct Point { x: int, y: int }`, field access `p.x` (read/write), nestable
+- `null` for reference types (string/array/struct) → recursive data structures (linked lists, trees); null deref is caught at runtime
 - Numeric conversions via the `int(x)` / `float(x)` built-ins
-- Variables are lexically block-scoped, with shadowing
+- Variables are lexically block-scoped, with shadowing; optional type annotations (`let x: T = ...`)
 - Arithmetic: `+ - * /` on two ints or two floats, `%` (int only), unary minus `-x`
 - Comparison: `== != < <= > >=` (yields a `bool`)
 - Logical: `&&`, `||` (short-circuit), `!` — operate on `bool`
