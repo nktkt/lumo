@@ -1,0 +1,5 @@
+# int() on a non-integer string aborts at runtime.
+fn main() {
+    print int("not a number");
+    return 0;
+}

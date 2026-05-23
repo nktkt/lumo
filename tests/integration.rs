@@ -268,25 +268,56 @@ fn substr_out_of_range_aborts() {
     run_err("substr_oob", "substr out of range");
 }
 
+#[test]
+fn parse_numbers() {
+    run_ok("parse_num");
+}
+
+#[test]
+fn parse_bad_int_aborts() {
+    run_err("parse_bad", "non-integer string");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {
     run_ok_stdin("sort_lines", "pear\nbanana\napple\ncherry\nfig\nkiwi\n");
 }
 
-/// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
-/// IR has `alloca`s, the optimized IR should not.
+/// Extract the body of `define ... @<name>(...) { ... }` from LLVM IR text.
+/// (We scope the alloca check to one function: runtime helpers like
+/// `lumo_parse_int` legitimately keep an address-taken alloca for `strtol`'s
+/// `endptr`, which mem2reg cannot promote.)
+fn function_body(ir: &str, name: &str) -> String {
+    let needle = format!("@{}(", name);
+    let start = ir
+        .lines()
+        .position(|l| l.starts_with("define") && l.contains(&needle))
+        .unwrap_or_else(|| panic!("function @{} not found in IR", name));
+    let mut body = String::new();
+    for line in ir.lines().skip(start) {
+        body.push_str(line);
+        body.push('\n');
+        if line == "}" {
+            break;
+        }
+    }
+    body
+}
+
+/// `-O2` must promote stack slots to SSA registers (mem2reg): `fib`'s
+/// unoptimized body has `alloca`s, its optimized body should not.
 #[test]
 fn optimization_promotes_allocas() {
-    let unopt = emit_ir("fib", None);
-    let opt = emit_ir("fib", Some("-O2"));
+    let unopt = function_body(&emit_ir("fib", None), "fib");
+    let opt = function_body(&emit_ir("fib", Some("-O2")), "fib");
     assert!(
         unopt.contains("alloca"),
-        "unoptimized IR was expected to contain allocas"
+        "unoptimized `fib` was expected to contain allocas"
     );
     assert!(
         !opt.contains("alloca"),
-        "`-O2` should remove allocas via mem2reg, but some remain:\n{}",
+        "`-O2` should remove `fib`'s allocas via mem2reg, but some remain:\n{}",
         opt
     );
 }

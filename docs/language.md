@@ -67,14 +67,16 @@ Because strings are immutable, `s[i] = ...` is a compile error. Together with
 processing:
 
 ```lumo
-fn parse_int(s: string) -> int {
-    let n = 0;
+# (To actually parse a number, use the built-in int(s) / float(s); this just
+# illustrates byte indexing.)
+fn digit_sum(s: string) -> int {
+    let total = 0;
     for (let i = 0; i < len(s); i = i + 1) {
-        n = n * 10 + (s[i] - 48);   # '0' is byte 48
+        total = total + (s[i] - 48);   # '0' is byte 48
     }
-    return n;
+    return total;
 }
-print parse_int("2026");   # 2026
+print digit_sum("2026");   # 10
 ```
 
 ## Literals
@@ -475,26 +477,35 @@ print 3.14;     # 3.14
 print "hi";     # hi
 ```
 
-### Conversions
+### Conversions and parsing
 
 `int(x)` and `float(x)` convert between the two numeric types — the only way to
-mix `int` and `float`, since there are no implicit conversions.
+mix `int` and `float`, since there are no implicit conversions — **or parse a
+`string`** into a number.
 
-- `float(i)` widens an `int` to a `float`.
-- `int(f)` truncates a `float` toward zero to an `int`.
-- Each accepts a numeric argument; `int(int)` and `float(float)` are no-ops.
+- `float(i)` widens an `int` to a `float`; `int(f)` truncates a `float` toward
+  zero. `int(int)` / `float(float)` are no-ops.
+- `int(s)` / `float(s)` parse a `string` (the whole string must be a valid
+  number, optional sign and — for `float` — decimal/exponent). An unparseable
+  string aborts at runtime (`lumo: int() got a non-integer string`).
+- **`is_int(s)`** and **`is_float(s)`** return whether a `string` parses, so you
+  can check before converting (the same guard pattern as `has` for maps).
 
 ```lumo
-let total = 7;
-let count = 2;
-print float(total) / float(count);  # 3.5  (float division)
-print int(3.9);                     # 3    (truncates)
+print float(7) / float(2);   # 3.5   (numeric conversion)
+print int(3.9);              # 3     (truncates)
+print int("42") + 1;         # 43    (parse)
+
+let s = "100";
+if (is_int(s)) {
+    print int(s) * 2;        # 200
+}
 ```
 
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`,
 `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, `delete`,
-`substr`, `split`, and `join` are reserved names — you cannot define a function
-with one of them.
+`substr`, `split`, `join`, `is_int`, and `is_float` are reserved names — you
+cannot define a function with one of them.
 
 ### `read_line`
 
@@ -556,8 +567,8 @@ print join(fields, " | ");             # a | b | c
 print join(split("x-y-z", "-"), "+");  # x+y+z  (round trip)
 ```
 
-Note: parsing a string to a number is not built in — `int()` only converts
-`float`→`int`. Write a small helper that scans digits (see `examples/csv.lum`).
+To turn a parsed field into a number, use `int(s)` / `float(s)` (guarded by
+`is_int` / `is_float`) — see [Conversions and parsing](#conversions-and-parsing).
 
 ### `len`
 

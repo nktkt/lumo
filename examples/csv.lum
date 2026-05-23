@@ -5,29 +5,16 @@
 #   printf 'ann,10\nbob,7\nann,5\n' | lumo run examples/csv.lum
 #   -> ann = 15 / bob = 7  (then "fields: ann | bob")
 
-# parse a non-negative integer from a string (stops at the first non-digit).
-# (Lumo's int() converts float->int; it does not parse strings.)
-fn parse_int(s: string) -> int {
-    let n = 0;
-    for (let i = 0; i < len(s); i = i + 1) {
-        let c = s[i];
-        if (c < 48 || c > 57) {
-            return n;
-        }
-        n = n * 10 + (c - 48);
-    }
-    return n;
-}
-
 fn main() {
     let totals: {string: int} = {};
 
     let line = read_line();
     while (line != null) {
         let cols = split(line, ",");
-        if (len(cols) == 2) {
+        # accept the row only if the score column is a valid integer
+        if (len(cols) == 2 && is_int(cols[1])) {
             let name = cols[0];
-            let score = parse_int(cols[1]);
+            let score = int(cols[1]);
             if (has(totals, name)) {
                 totals[name] = totals[name] + score;
             } else {

@@ -168,22 +168,25 @@ fn main() {
 
 ---
 
-### How do I parse a non-negative integer from a string?
+### How do I parse a number from a string?
 
-Each digit byte equals its value plus 48 (`'0'` is byte 48), so `s[i] - 48`
-gives the digit. Accumulate left to right with `n * 10 + digit`.
+Use the built-in `int(s)` / `float(s)`. They abort on a non-number, so check
+first with `is_int` / `is_float` when the input might be invalid (e.g. user or
+file input).
 
 ```lumo
-fn parse_int(s: string) -> int {
-    let n = 0;
-    for (let i = 0; i < len(s); i = i + 1) {
-        n = n * 10 + (s[i] - 48);    # '0' is byte 48
-    }
-    return n;
-}
-
 fn main() {
-    print parse_int("2026");    # 2026
+    print int("2026") + 1;        # 2027
+    print float("3.14");          # 3.14
+
+    let fields = ["10", "oops", "20"];
+    let sum = 0;
+    for (f in fields) {
+        if (is_int(f)) {
+            sum = sum + int(f);   # skips "oops"
+        }
+    }
+    print sum;                    # 30
     return 0;
 }
 ```
