@@ -63,6 +63,24 @@ pub enum ExprKind {
         array: Box<Expr>,
         index: Box<Expr>,
     },
+    /// 構造体リテラル `Name { field: value, ... }`
+    StructLit {
+        name: String,
+        fields: Vec<FieldInit>,
+    },
+    /// フィールドアクセス `obj.field`
+    Field {
+        obj: Box<Expr>,
+        field: String,
+    },
+}
+
+/// 構造体リテラル中の1フィールド初期化 `name: value`
+#[derive(Debug, Clone)]
+pub struct FieldInit {
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -122,4 +140,17 @@ pub struct Function {
     pub span: Span,
 }
 
-pub type Program = Vec<Function>;
+/// 構造体定義 `struct Name { f: T, ... }`
+#[derive(Debug, Clone)]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<Param>,
+    pub span: Span,
+}
+
+/// プログラム全体（構造体定義と関数の集まり）
+#[derive(Debug, Clone)]
+pub struct Program {
+    pub structs: Vec<StructDef>,
+    pub funcs: Vec<Function>,
+}

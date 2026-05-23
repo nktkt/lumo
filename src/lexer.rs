@@ -13,6 +13,7 @@ pub enum Tok {
     Ident(String),
     // キーワード
     Fn,
+    Struct,
     Let,
     If,
     Else,
@@ -34,6 +35,7 @@ pub enum Tok {
     Comma,     // ,
     Semicolon, // ;
     Colon,     // :
+    Dot,       // .
     // 演算子
     Assign, // =
     Plus,
@@ -191,6 +193,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             let s: String = chars[begin..i].iter().map(|(_, ch)| *ch).collect();
             let kind = match s.as_str() {
                 "fn" => Tok::Fn,
+                "struct" => Tok::Struct,
                 "let" => Tok::Let,
                 "if" => Tok::If,
                 "else" => Tok::Else,
@@ -239,6 +242,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             ',' => Tok::Comma,
             ';' => Tok::Semicolon,
             ':' => Tok::Colon,
+            '.' => Tok::Dot,
             '=' => Tok::Assign,
             '+' => Tok::Plus,
             '-' => Tok::Minus,

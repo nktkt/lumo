@@ -39,6 +39,9 @@ pub enum Type {
     Str,
     /// 要素型 `Elem` の配列（ヒープ確保。[長さ i64][8byteスロット×N]）。
     Array(Elem),
+    /// ユーザー定義の構造体（名前で参照。ヒープ確保したポインタ）。
+    /// 名前は `intern` でリークして `&'static str` にし、`Copy` を保つ。
+    Struct(&'static str),
 }
 
 impl Type {
@@ -49,6 +52,7 @@ impl Type {
             Type::Float => "float".to_string(),
             Type::Str => "string".to_string(),
             Type::Array(e) => format!("[{}]", e.name()),
+            Type::Struct(n) => n.to_string(),
         }
     }
 
@@ -64,7 +68,13 @@ impl Type {
             Type::Bool => Some(Elem::Bool),
             Type::Float => Some(Elem::Float),
             Type::Str => Some(Elem::Str),
-            Type::Array(_) => None,
+            Type::Array(_) | Type::Struct(_) => None,
         }
     }
+}
+
+/// 識別子を `&'static str` にする（短命なコンパイラなのでリークで十分）。
+/// 構造体名を `Type::Struct` に埋め込み Copy を保つために使う。
+pub fn intern(s: &str) -> &'static str {
+    Box::leak(s.to_string().into_boxed_str())
 }

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::diagnostics::Diagnostic;
 use crate::span::Span;
-use crate::types::Type;
+use crate::types::{intern, Type};
 
 /// 関数シグネチャ（引数の型と戻り値の型）
 struct Sig {
@@ -17,11 +17,64 @@ struct Sig {
     ret: Type,
 }
 
+/// 構造体名 -> フィールド（定義順の (名前, 型)）
+type Structs = HashMap<String, Vec<(String, Type)>>;
+
+/// 型が実在する型を指すか検証する（構造体名が定義済みか）。
+fn validate_type(t: Type, structs: &Structs, span: Span) -> Result<(), Diagnostic> {
+    if let Type::Struct(n) = t {
+        if !structs.contains_key(n) {
+            return Err(Diagnostic::error(format!("不明な型: {}", n))
+                .with_code("E0300")
+                .at(span));
+        }
+    }
+    Ok(())
+}
+
 pub fn check(program: &Program) -> Result<(), Diagnostic> {
-    // 1) 全関数のシグネチャを集める（前方参照・相互再帰のため）
+    // 1) 構造体レジストリを作る（フィールド名の重複・予約名を検査）
+    let mut structs: Structs = HashMap::new();
+    for s in &program.structs {
+        if is_reserved_name(&s.name) {
+            return Err(Diagnostic::error(format!(
+                "{} は予約語なので構造体名に使えません",
+                s.name
+            ))
+            .with_code("E0302")
+            .at(s.span));
+        }
+        if structs.contains_key(&s.name) {
+            return Err(
+                Diagnostic::error(format!("構造体 {} が二重に定義されています", s.name))
+                    .with_code("E0304")
+                    .at(s.span),
+            );
+        }
+        let mut fields: Vec<(String, Type)> = Vec::new();
+        for f in &s.fields {
+            if fields.iter().any(|(n, _)| n == &f.name) {
+                return Err(
+                    Diagnostic::error(format!("フィールド {} が重複しています", f.name))
+                        .with_code("E0307")
+                        .at(f.span),
+                );
+            }
+            fields.push((f.name.clone(), f.ty));
+        }
+        structs.insert(s.name.clone(), fields);
+    }
+    // フィールドの型が実在する型を指すか検証
+    for s in &program.structs {
+        for f in &s.fields {
+            validate_type(f.ty, &structs, f.span)?;
+        }
+    }
+
+    // 2) 関数シグネチャを集める（前方参照・相互再帰のため）
     let mut sigs: HashMap<String, Sig> = HashMap::new();
-    for f in program {
-        if is_reserved_name(&f.name) {
+    for f in &program.funcs {
+        if is_reserved_name(&f.name) || structs.contains_key(&f.name) {
             return Err(Diagnostic::error(format!(
                 "{} は型名・組み込み関数なので関数名に使えません",
                 f.name
@@ -36,6 +89,10 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
                     .at(f.span),
             );
         }
+        for p in &f.params {
+            validate_type(p.ty, &structs, p.span)?;
+        }
+        validate_type(f.ret, &structs, f.span)?;
         sigs.insert(
             f.name.clone(),
             Sig {
@@ -51,10 +108,11 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
         );
     }
 
-    // 2) 各関数の本体を検査
-    for f in program {
+    // 3) 各関数の本体を検査
+    for f in &program.funcs {
         let mut checker = FnChecker {
             sigs: &sigs,
+            structs: &structs,
             // 関数スコープ（引数とトップレベルのローカル）を最初の層にする
             scopes: vec![HashMap::new()],
             ret: f.ret,
@@ -79,6 +137,7 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
 
 struct FnChecker<'a> {
     sigs: &'a HashMap<String, Sig>,
+    structs: &'a Structs,
     /// レキシカルスコープのスタック（内側が末尾）。`let` は最内へ、参照は内→外で探索。
     scopes: Vec<HashMap<String, Type>>,
     ret: Type,
@@ -124,11 +183,15 @@ impl FnChecker<'_> {
             StmtKind::Assign { target, value } => {
                 // 左辺は変数か添字のみ（lvalue）。その型と右辺の型を一致させる。
                 let target_ty = match &target.kind {
-                    ExprKind::Var(_) | ExprKind::Index { .. } => self.check_expr(target)?,
+                    ExprKind::Var(_) | ExprKind::Index { .. } | ExprKind::Field { .. } => {
+                        self.check_expr(target)?
+                    }
                     _ => {
-                        return Err(Diagnostic::error("代入先が変数でも配列要素でもありません")
-                            .with_code("E0204")
-                            .at(target.span));
+                        return Err(Diagnostic::error(
+                            "代入先が変数・配列要素・フィールドのいずれでもありません",
+                        )
+                        .with_code("E0204")
+                        .at(target.span));
                     }
                 };
                 let t = self.check_expr(value)?;
@@ -144,10 +207,11 @@ impl FnChecker<'_> {
             }
             StmtKind::Print(e) => {
                 let t = self.check_expr(e)?;
-                if matches!(t, Type::Array(_)) {
-                    return Err(Diagnostic::error(
-                        "print できるのは int/bool/float/string です（配列は不可）",
-                    )
+                if matches!(t, Type::Array(_) | Type::Struct(_)) {
+                    return Err(Diagnostic::error(format!(
+                        "print できるのは int/bool/float/string です（{} は不可）",
+                        t.name()
+                    ))
                     .with_code("E0200")
                     .at(e.span));
                 }
@@ -428,6 +492,76 @@ impl FnChecker<'_> {
                     ))
                     .with_code("E0205")
                     .at(array.span)),
+                }
+            }
+            ExprKind::StructLit { name, fields } => {
+                let def = self.structs.get(name).ok_or_else(|| {
+                    Diagnostic::error(format!("不明な構造体: {}", name))
+                        .with_code("E0303")
+                        .at(e.span)
+                })?;
+                // フィールドの過不足・重複・型を検査する（出現順は問わない）
+                let mut seen: Vec<&str> = Vec::new();
+                for fi in fields {
+                    let Some((_, fty)) = def.iter().find(|(n, _)| n == &fi.name) else {
+                        return Err(Diagnostic::error(format!(
+                            "構造体 {} にフィールド {} はありません",
+                            name, fi.name
+                        ))
+                        .with_code("E0306")
+                        .at(fi.span));
+                    };
+                    if seen.contains(&fi.name.as_str()) {
+                        return Err(Diagnostic::error(format!(
+                            "フィールド {} が二重に指定されています",
+                            fi.name
+                        ))
+                        .with_code("E0307")
+                        .at(fi.span));
+                    }
+                    seen.push(&fi.name);
+                    let vt = self.check_expr(&fi.value)?;
+                    expect(*fty, vt, fi.value.span)?;
+                }
+                if seen.len() != def.len() {
+                    let missing: Vec<&str> = def
+                        .iter()
+                        .filter(|(n, _)| !seen.contains(&n.as_str()))
+                        .map(|(n, _)| n.as_str())
+                        .collect();
+                    return Err(Diagnostic::error(format!(
+                        "構造体 {} のフィールドが足りません: {}",
+                        name,
+                        missing.join(", ")
+                    ))
+                    .with_code("E0307")
+                    .at(e.span));
+                }
+                Ok(Type::Struct(intern(name)))
+            }
+            ExprKind::Field { obj, field } => {
+                let obj_ty = self.check_expr(obj)?;
+                match obj_ty {
+                    Type::Struct(sname) => {
+                        let def = self.structs.get(sname).unwrap();
+                        def.iter()
+                            .find(|(n, _)| n == field)
+                            .map(|(_, t)| *t)
+                            .ok_or_else(|| {
+                                Diagnostic::error(format!(
+                                    "構造体 {} にフィールド {} はありません",
+                                    sname, field
+                                ))
+                                .with_code("E0306")
+                                .at(e.span)
+                            })
+                    }
+                    other => Err(Diagnostic::error(format!(
+                        "フィールドアクセスできるのは構造体だけですが {} が使われています",
+                        other.name()
+                    ))
+                    .with_code("E0305")
+                    .at(obj.span)),
                 }
             }
         }

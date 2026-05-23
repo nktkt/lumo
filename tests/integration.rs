@@ -150,6 +150,11 @@ fn arrays() {
     run_ok("arrays");
 }
 
+#[test]
+fn structs() {
+    run_ok("structs");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -288,4 +293,24 @@ fn err_array_mixed() {
 #[test]
 fn oob_runtime_check() {
     run_err("oob", "out of bounds");
+}
+
+#[test]
+fn err_unknown_field() {
+    run_err("err_unknown_field", "E0306");
+}
+
+#[test]
+fn err_missing_field() {
+    run_err("err_missing_field", "E0307");
+}
+
+#[test]
+fn err_unknown_struct() {
+    run_err("err_unknown_struct", "E0303");
+}
+
+#[test]
+fn err_field_nonstruct() {
+    run_err("err_field_nonstruct", "E0305");
 }

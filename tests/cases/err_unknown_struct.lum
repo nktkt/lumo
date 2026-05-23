@@ -1,0 +1,4 @@
+fn main() {
+    let g = Ghost { x: 1 };
+    return 0;
+}
