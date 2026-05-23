@@ -299,6 +299,176 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_map_runtime();
         // 文字列ツールキット（substr/split/join）のランタイム。
         self.declare_string_runtime();
+        // 文字列→数値パース（int()/float() の string 版、is_int/is_float）のランタイム。
+        self.declare_parse_runtime();
+    }
+
+    /// 文字列→数値パースのランタイム。libc の strtol/strtod を endptr 付きで呼び、
+    /// 「文字列全体を消費したか」で妥当性を判定する（前後のゴミは不正扱い）。
+    /// parse は不正なら panic、is_* は bool を返す。
+    fn declare_parse_runtime(&mut self) {
+        let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let f64t = self.ctx.f64_type();
+        let i1t = self.ctx.bool_type();
+        let i8t = self.ctx.i8_type();
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let ext = Some(Linkage::External);
+
+        // long strtol(char* nptr, char** endptr, int base) / double strtod(char*, char**)
+        self.module.add_function(
+            "strtol",
+            i64t.fn_type(&[ptr.into(), ptr.into(), i32t.into()], false),
+            ext,
+        );
+        self.module.add_function(
+            "strtod",
+            f64t.fn_type(&[ptr.into(), ptr.into()], false),
+            ext,
+        );
+
+        // s 全体が数値として消費されたか（end が NUL を指し、かつ何か読めた）を i1 で返す。
+        let validity = |cg: &Self, s: PointerValue<'ctx>, end: PointerValue<'ctx>| {
+            let si = cg.builder.build_ptr_to_int(s, i64t, "si").unwrap();
+            let ei = cg.builder.build_ptr_to_int(end, i64t, "ei").unwrap();
+            let parsed = cg
+                .builder
+                .build_int_compare(IntPredicate::NE, ei, si, "parsed")
+                .unwrap();
+            let ec = cg
+                .builder
+                .build_load(i8t, end, "ec")
+                .unwrap()
+                .into_int_value();
+            let consumed = cg
+                .builder
+                .build_int_compare(IntPredicate::EQ, ec, i8t.const_zero(), "consumed")
+                .unwrap();
+            cg.builder.build_and(parsed, consumed, "ok").unwrap()
+        };
+
+        // --- i1 lumo_is_int(ptr s) ---
+        let is_int_fn =
+            self.module
+                .add_function("lumo_is_int", i1t.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(is_int_fn, "entry");
+            self.builder.position_at_end(entry);
+            let s = is_int_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let endp = self.builder.build_alloca(ptr, "endp").unwrap();
+            let strtol = self.module.get_function("strtol").unwrap();
+            self.builder
+                .build_call(
+                    strtol,
+                    &[s.into(), endp.into(), i32t.const_int(10, false).into()],
+                    "",
+                )
+                .unwrap();
+            let end = self
+                .builder
+                .build_load(ptr, endp, "end")
+                .unwrap()
+                .into_pointer_value();
+            let ok = validity(self, s, end);
+            self.builder.build_return(Some(&ok)).unwrap();
+        }
+
+        // --- i64 lumo_parse_int(ptr s): 不正なら panic ---
+        let parse_int_fn =
+            self.module
+                .add_function("lumo_parse_int", i64t.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(parse_int_fn, "entry");
+            let ok_bb = self.ctx.append_basic_block(parse_int_fn, "ok");
+            let fail_bb = self.ctx.append_basic_block(parse_int_fn, "fail");
+            self.builder.position_at_end(entry);
+            let s = parse_int_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let endp = self.builder.build_alloca(ptr, "endp").unwrap();
+            let strtol = self.module.get_function("strtol").unwrap();
+            let v = self
+                .builder
+                .build_call(
+                    strtol,
+                    &[s.into(), endp.into(), i32t.const_int(10, false).into()],
+                    "v",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let end = self
+                .builder
+                .build_load(ptr, endp, "end")
+                .unwrap()
+                .into_pointer_value();
+            let ok = validity(self, s, end);
+            self.builder
+                .build_conditional_branch(ok, ok_bb, fail_bb)
+                .unwrap();
+            self.builder.position_at_end(fail_bb);
+            self.panic("lumo: int() got a non-integer string\n", "parse_int_msg");
+            self.builder.position_at_end(ok_bb);
+            self.builder.build_return(Some(&v)).unwrap();
+        }
+
+        // --- i1 lumo_is_float(ptr s) ---
+        let is_float_fn =
+            self.module
+                .add_function("lumo_is_float", i1t.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(is_float_fn, "entry");
+            self.builder.position_at_end(entry);
+            let s = is_float_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let endp = self.builder.build_alloca(ptr, "endp").unwrap();
+            let strtod = self.module.get_function("strtod").unwrap();
+            self.builder
+                .build_call(strtod, &[s.into(), endp.into()], "")
+                .unwrap();
+            let end = self
+                .builder
+                .build_load(ptr, endp, "end")
+                .unwrap()
+                .into_pointer_value();
+            let ok = validity(self, s, end);
+            self.builder.build_return(Some(&ok)).unwrap();
+        }
+
+        // --- f64 lumo_parse_float(ptr s): 不正なら panic ---
+        let parse_float_fn =
+            self.module
+                .add_function("lumo_parse_float", f64t.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(parse_float_fn, "entry");
+            let ok_bb = self.ctx.append_basic_block(parse_float_fn, "ok");
+            let fail_bb = self.ctx.append_basic_block(parse_float_fn, "fail");
+            self.builder.position_at_end(entry);
+            let s = parse_float_fn
+                .get_nth_param(0)
+                .unwrap()
+                .into_pointer_value();
+            let endp = self.builder.build_alloca(ptr, "endp").unwrap();
+            let strtod = self.module.get_function("strtod").unwrap();
+            let v = self
+                .builder
+                .build_call(strtod, &[s.into(), endp.into()], "v")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_float_value();
+            let end = self
+                .builder
+                .build_load(ptr, endp, "end")
+                .unwrap()
+                .into_pointer_value();
+            let ok = validity(self, s, end);
+            self.builder
+                .build_conditional_branch(ok, ok_bb, fail_bb)
+                .unwrap();
+            self.builder.position_at_end(fail_bb);
+            self.panic("lumo: float() got a non-number string\n", "parse_float_msg");
+            self.builder.position_at_end(ok_bb);
+            self.builder.build_return(Some(&v)).unwrap();
+        }
     }
 
     /// 文字列ツールキットのランタイム（substr/split/join）を IR で定義する。
@@ -2366,38 +2536,78 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             },
             ExprKind::Call { name, args } if name == "int" => {
-                // float -> int は切り捨て、int -> int は恒等
+                // float -> int は切り捨て、string -> int はパース（不正なら panic）、int は恒等
                 let (v, ty) = self.gen_expr(&args[0]);
-                if ty == Type::Float {
-                    let i = self
-                        .builder
-                        .build_float_to_signed_int(
-                            v.into_float_value(),
-                            self.ctx.i64_type(),
-                            "toint",
-                        )
-                        .unwrap();
-                    (i.into(), Type::Int)
-                } else {
-                    (v, Type::Int)
+                match ty {
+                    Type::Float => {
+                        let i = self
+                            .builder
+                            .build_float_to_signed_int(
+                                v.into_float_value(),
+                                self.ctx.i64_type(),
+                                "toint",
+                            )
+                            .unwrap();
+                        (i.into(), Type::Int)
+                    }
+                    Type::Str => {
+                        let f = self.module.get_function("lumo_parse_int").unwrap();
+                        let r = self
+                            .builder
+                            .build_call(f, &[v.into()], "parseint")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic();
+                        (r, Type::Int)
+                    }
+                    _ => (v, Type::Int),
                 }
             }
             ExprKind::Call { name, args } if name == "float" => {
-                // int -> float、float -> float は恒等
+                // int -> float、string -> float はパース（不正なら panic）、float は恒等
                 let (v, ty) = self.gen_expr(&args[0]);
-                if ty == Type::Int {
-                    let f = self
-                        .builder
-                        .build_signed_int_to_float(
-                            v.into_int_value(),
-                            self.ctx.f64_type(),
-                            "tofloat",
-                        )
-                        .unwrap();
-                    (f.into(), Type::Float)
-                } else {
-                    (v, Type::Float)
+                match ty {
+                    Type::Int => {
+                        let f = self
+                            .builder
+                            .build_signed_int_to_float(
+                                v.into_int_value(),
+                                self.ctx.f64_type(),
+                                "tofloat",
+                            )
+                            .unwrap();
+                        (f.into(), Type::Float)
+                    }
+                    Type::Str => {
+                        let f = self.module.get_function("lumo_parse_float").unwrap();
+                        let r = self
+                            .builder
+                            .build_call(f, &[v.into()], "parsefloat")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic();
+                        (r, Type::Float)
+                    }
+                    _ => (v, Type::Float),
                 }
+            }
+            ExprKind::Call { name, args } if name == "is_int" || name == "is_float" => {
+                let (v, _) = self.gen_expr(&args[0]);
+                let f = self
+                    .module
+                    .get_function(if name == "is_int" {
+                        "lumo_is_int"
+                    } else {
+                        "lumo_is_float"
+                    })
+                    .unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[v.into()], "isnum")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Bool)
             }
             ExprKind::Call { name, args } if matches!(name.as_str(), "sqrt" | "floor" | "ceil") => {
                 // float -> float の単項数学関数（intrinsic 呼び出し）

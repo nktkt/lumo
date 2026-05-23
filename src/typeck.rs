@@ -488,7 +488,7 @@ impl FnChecker<'_> {
                 }
             }
             ExprKind::Call { name, args } => {
-                // 組み込み変換 int()/float()
+                // 組み込み変換 int()/float(): 数値を変換、または string をパースする
                 if name == "int" || name == "float" {
                     if args.len() != 1 {
                         return Err(Diagnostic::error(format!(
@@ -500,9 +500,10 @@ impl FnChecker<'_> {
                         .at(e.span));
                     }
                     let at = self.check_expr(&args[0])?;
-                    if !at.is_numeric() {
+                    // 数値（変換）か string（パース。不正な文字列は実行時に panic）を受ける
+                    if !at.is_numeric() && at != Type::Str {
                         return Err(Diagnostic::error(format!(
-                            "{}() は数値(int または float)を変換しますが {} が渡されました",
+                            "{}() は数値か string を受け取りますが {} が渡されました",
                             name,
                             at.name()
                         ))
@@ -514,6 +515,21 @@ impl FnChecker<'_> {
                     } else {
                         Type::Float
                     });
+                }
+
+                // 文字列が int/float としてパース可能か -> bool（int()/float() の前の確認に）
+                if name == "is_int" || name == "is_float" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は引数1個ですが {} 個渡されました",
+                            name,
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    return Ok(Type::Bool);
                 }
 
                 // 組み込み len(): 文字列か配列の長さ -> int
@@ -1034,6 +1050,8 @@ fn is_reserved_name(name: &str) -> bool {
             | "substr"
             | "split"
             | "join"
+            | "is_int"
+            | "is_float"
     )
 }
 

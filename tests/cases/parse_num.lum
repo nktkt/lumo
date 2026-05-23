@@ -1,0 +1,35 @@
+# Parsing strings to numbers: int(s) / float(s), guarded by is_int / is_float.
+
+fn main() {
+    # int() / float() now also parse strings
+    print int("42");              # 42
+    print int("-17");             # -17
+    print int("100") + int("23"); # 123
+    print float("3.5");           # 3.5
+    print float("2");             # 2
+
+    # numeric arguments still convert (backward compatible)
+    print int(3.9);               # 3
+    print float(5);               # 5
+
+    # is_int / is_float predicates
+    print is_int("42");           # true
+    print is_int("4.5");          # false
+    print is_int("abc");          # false
+    print is_int("");             # false
+    print is_int("12x");          # false
+    print is_float("3.14");       # true
+    print is_float("42");         # true
+    print is_float("nope");       # false
+
+    # guard pattern: sum only the valid integers
+    let inputs = ["10", "oops", "20", "5", ""];
+    let sum = 0;
+    for (s in inputs) {
+        if (is_int(s)) {
+            sum = sum + int(s);
+        }
+    }
+    print sum;                    # 35
+    return 0;
+}

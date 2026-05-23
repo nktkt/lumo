@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.27.0]
+
+### Added
+
+- **String → number parsing.** `int(s)` and `float(s)` now also accept a `string`, parsing it (via libc `strtol`/`strtod`, requiring the whole string to be consumed). An unparseable string aborts at runtime (`lumo: int() got a non-integer string`). The predicates **`is_int(s)`** and **`is_float(s)`** report whether a string parses, so input can be validated before converting — the `has`/`m[k]` guard pattern. (`int`/`float` on a number still convert as before.)
+
+### Changed
+
+- `examples/csv.lum` now uses `is_int` + `int(s)` instead of a hand-written digit scanner.
+
 ## [0.26.0]
 
 ### Added

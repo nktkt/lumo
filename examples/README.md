@@ -56,5 +56,5 @@ Listed from simplest to most advanced:
 | [`points.lum`](points.lum) | Arrays of structs `[Point]` — indexing yields a reference, so `ps[i].x` reads and mutates in place while computing a centroid. |
 | [`sum_stdin.lum`](sum_stdin.lum) | Reading input — `read_line()` returning a line or `null` at end of input, looped to parse and sum integers piped on stdin. |
 | [`wordcount.lum`](wordcount.lum) | Maps — tally word frequencies from stdin in a `{string: int}`, then print each unique word and count using `has`, `keys`, a sort, and a `for`-`in` loop. |
-| [`csv.lum`](csv.lum) | The string toolkit — parse `name,score` lines from stdin with `split`, total them in a map, sort, and rebuild a delimited line with `join`. |
+| [`csv.lum`](csv.lum) | The string toolkit — `split` `name,score` lines from stdin, validate with `is_int` and parse with `int(s)`, total them in a map, sort, and rebuild a line with `join`. |
 | [`linked_list.lum`](linked_list.lum) | `null` as a nullable reference plus a self-referential `struct Node` — a recursive linked list with prepend, traversal, and in-place reversal. |
