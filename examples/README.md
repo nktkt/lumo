@@ -59,3 +59,4 @@ Listed from simplest to most advanced:
 | [`csv.lum`](csv.lum) | The string toolkit — `split` `name,score` lines from stdin, validate with `is_int` and parse with `int(s)`, total them in a map, sort, and rebuild a line with `join`. |
 | [`linked_list.lum`](linked_list.lum) | `null` as a nullable reference plus a self-referential `struct Node` — a recursive linked list with prepend, traversal, and in-place reversal. |
 | [`save_load.lum`](save_load.lum) | File I/O — `write_file` to persist a `name,score` table to disk, then `read_file` (returning `null` if absent) to load it back, `split` it into records, and report the leader. |
+| [`matrix.lum`](matrix.lum) | Nested collections — `[[int]]` matrices with 2D literals, chained indexing (`m[i][j]`), and growing rows with `push`, driving a full matrix-multiply. |

@@ -43,9 +43,11 @@ Lumo has four primitive types and three compound types:
 - `bool` — either `true` or `false`
 - `float` — 64-bit IEEE double
 - `string` — an immutable text value
-- `[T]` — an array of `T`, where `T` is `int`, `bool`, `float`, `string`, or a
-  struct (see [Arrays](#arrays))
-- `{string: V}` — a map from string keys to values of type `V` (see [Maps](#maps))
+- `[T]` — an array of `T`, where `T` is any type: a scalar, a struct, or another
+  collection (`[[int]]`, `[{string: int}]`) (see [Arrays](#arrays))
+- `{string: V}` — a map from string keys to values of any type `V`, including
+  arrays and maps (`{string: [int]}`) (see [Maps](#maps) and
+  [Nested collections](#nested-collections))
 - a user-defined `struct` (see [Structs](#structs))
 
 There are **no implicit conversions** between types. An `int` is never
@@ -307,8 +309,10 @@ fn odd(n: int) -> bool {
 
 ## Arrays
 
-An array type is written `[T]` where `T` is `int`, `bool`, `float`, `string`, or
-a struct (e.g. `[Point]`). Arrays of arrays are not supported yet.
+An array type is written `[T]` where `T` is any type: a scalar (`int`, `bool`,
+`float`, `string`), a struct (e.g. `[Point]`), or **another collection** —
+arrays nest (`[[int]]`, a matrix) and can hold maps (`[{string: int}]`). See
+[Nested collections](#nested-collections).
 
 - **Literal:** `[e1, e2, ...]` — elements all the same type; the element type is
   inferred. The **empty literal `[]`** is allowed only when a `let` gives the
@@ -360,9 +364,10 @@ prints `lumo: index out of bounds` to stderr and exits with status 101.
 ## Maps
 
 A map (associative array) type is written `{string: V}`. **Keys are always
-`string`**; the value type `V` may be a scalar (`int`, `bool`, `float`,
-`string`) or a struct. (Array- and map-valued maps are not supported yet — see
-[RFC 0002](rfcs/0002-map-type.md).)
+`string`**; the value type `V` may be any type — a scalar (`int`, `bool`,
+`float`, `string`), a struct, or **another collection**, so maps can hold arrays
+(`{string: [int]}`) or nest (`{string: {string: int}}`). See
+[Nested collections](#nested-collections) and [RFC 0002](rfcs/0002-map-type.md).
 
 - **Literal:** `{"a": 1, "b": 2}` — keys are string expressions, values all the
   same type (inferred). The **empty literal `{}`** needs a map annotation, like
@@ -393,6 +398,55 @@ Maps are backed by a separately-chained hash table (FNV-1a hashing) that grows
 automatically — when the load factor exceeds 0.75 the bucket array is rehashed
 into one twice as large, so lookups stay near O(1) as the map fills. Entries —
 like all heap data — are reclaimed only at program exit (RFC 0001).
+
+## Nested collections
+
+Arrays and maps can hold **other arrays and maps** as their element/value type,
+to any depth — the element type `[T]` and value type `{string: V}` accept a
+collection just as readily as a scalar:
+
+| Type | What it is |
+| --- | --- |
+| `[[int]]` | a 2D array (matrix) — a list of `[int]` rows |
+| `{string: [int]}` | a map from a key to a list (group-by) |
+| `[{string: int}]` | a list of records |
+| `{string: {string: int}}` | a nested map (e.g. table → row → value) |
+
+Indexing **chains**: `grid[i][j]` indexes the row `grid[i]` and then column `j`,
+and assignment works at any depth because the inner collection is a reference:
+
+```lumo
+let grid = [[1, 2, 3], [4, 5, 6]];
+print grid[1][2];           # 6
+grid[1][0] = 40;            # mutates the inner row in place
+print grid[1][0];           # 40
+
+# build a ragged matrix with push
+let rows: [[int]] = [];
+for (let i = 0; i < 3; i = i + 1) {
+    let row: [int] = [];
+    for (let j = 0; j <= i; j = j + 1) { row = push(row, j); }
+    rows = push(rows, row);
+}
+print len(rows[2]);         # 3
+
+# map of arrays (group-by) and a map of maps
+let groups: {string: [int]} = {};
+groups["even"] = [2, 4, 6];
+print groups["even"][1];    # 4
+
+let table: {string: {string: int}} = {};
+table["a"] = {"score": 10};
+table["a"]["score"] = 15;
+print table["a"]["score"];  # 15
+```
+
+Because every collection value is a pointer, nesting costs nothing extra in the
+value model — `[[int]]` stores each row as a pointer in the outer array's slots.
+The empty-literal rule still applies at each level: `let rows: [[int]] = [];`
+needs the annotation, and `null` cannot be an element or value type (its type
+can't be inferred). See [`examples/matrix.lum`](../examples/matrix.lum) for
+matrix multiplication built on `[[int]]`.
 
 ## Structs
 
