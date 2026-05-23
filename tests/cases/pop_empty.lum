@@ -1,0 +1,6 @@
+# Popping from an empty array aborts at runtime.
+fn main() {
+    let a: [int] = [];
+    print pop(a);
+    return 0;
+}

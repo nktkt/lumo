@@ -493,16 +493,43 @@ impl Parser {
         loop {
             if self.peek() == &Tok::LBracket {
                 self.next();
-                let index = self.parse_expr()?;
-                self.eat(&Tok::RBracket)?;
-                let span = Span::new(e.span.start, self.last_end);
-                e = Expr {
-                    kind: ExprKind::Index {
-                        array: Box::new(e),
-                        index: Box::new(index),
-                    },
-                    span,
+                // 角括弧の中身は添字 `[i]` かスライス `[lo:hi]`。`:` の有無で区別する。
+                // lo/hi はどちらも省略でき（`[:]` `[i:]` `[:j]`）、省略は 0／長さを意味する。
+                let lo = if self.peek() == &Tok::Colon {
+                    None
+                } else {
+                    Some(self.parse_expr()?)
                 };
+                if self.peek() == &Tok::Colon {
+                    self.next(); // ':' を読み飛ばす
+                    let hi = if self.peek() == &Tok::RBracket {
+                        None
+                    } else {
+                        Some(self.parse_expr()?)
+                    };
+                    self.eat(&Tok::RBracket)?;
+                    let span = Span::new(e.span.start, self.last_end);
+                    e = Expr {
+                        kind: ExprKind::Slice {
+                            seq: Box::new(e),
+                            lo: lo.map(Box::new),
+                            hi: hi.map(Box::new),
+                        },
+                        span,
+                    };
+                } else {
+                    // `:` が無ければ添字。lo は必ず Some（先頭が `:` なら上で slice 側へ）。
+                    let index = lo.expect("添字には式があるはず");
+                    self.eat(&Tok::RBracket)?;
+                    let span = Span::new(e.span.start, self.last_end);
+                    e = Expr {
+                        kind: ExprKind::Index {
+                            array: Box::new(e),
+                            index: Box::new(index),
+                        },
+                        span,
+                    };
+                }
             } else if self.peek() == &Tok::Dot {
                 self.next();
                 let (field, _) = self.parse_ident()?;

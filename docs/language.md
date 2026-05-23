@@ -318,8 +318,11 @@ arrays nest (`[[int]]`, a matrix) and can hold maps (`[{string: int}]`). See
   inferred. The **empty literal `[]`** is allowed only when a `let` gives the
   array type, e.g. `let xs: [int] = [];` — that's how you start a growable array.
 - **Index:** `a[i]` reads, `a[i] = v;` writes. The index is an `int`.
+- **Slice:** `a[lo:hi]` returns a new array with elements `lo..hi` (see
+  [Slicing](#slicing)).
 - **Length:** `len(a)` returns the number of elements as an `int`.
 - **Grow:** `push(a, x)` appends `x` and returns the array (see below).
+- **Shrink:** `pop(a)` removes the last element and returns it (see below).
 
 ```lumo
 let xs = [10, 20, 30];
@@ -360,6 +363,46 @@ Arrays are heap-allocated and, like concatenated strings, are currently
 reclaimed only at program exit — see [RFC 0001](rfcs/0001-memory-model.md).
 Indexing is **bounds-checked**: an out-of-range index (including a negative one)
 prints `lumo: index out of bounds` to stderr and exits with status 101.
+
+### Shrinking arrays: `pop`
+
+`pop(a)` removes the **last** element of `a` and returns it (typed as the element
+type), shrinking `a` in place — no reassignment needed. Together with `push` this
+makes an array a stack:
+
+```lumo
+let stack: [int] = [];
+stack = push(stack, 1);
+stack = push(stack, 2);
+print pop(stack);   # 2
+print pop(stack);   # 1
+print len(stack);   # 0
+```
+
+`pop` on an **empty** array aborts at runtime (`lumo: pop from empty array`,
+exit 101) — check `len(a) > 0` first if it might be empty.
+
+### Slicing
+
+`seq[lo:hi]` returns the half-open range `lo..hi` of an array or string — for an
+array a **new array** (an independent copy), for a string a **new string**. Both
+bounds are optional: `lo` defaults to `0` and `hi` to the length.
+
+```lumo
+let a = [10, 20, 30, 40, 50];
+print a[1:3];     # (a new [20, 30])
+print a[:2];      # [10, 20]
+print a[3:];      # [40, 50]
+print a[:];       # a full copy
+
+print "hello"[1:4];   # ell
+print "hello"[2:];    # llo
+```
+
+Slicing is **bounds-checked like `substr`**: it requires `0 <= lo <= hi <= len`,
+and otherwise aborts (`lumo: slice out of range`, exit 101). An array slice is a
+copy, so mutating it does not affect the original. (A string slice is exactly
+`substr(s, lo, hi - lo)`.)
 
 ## Maps
 
@@ -556,7 +599,7 @@ if (is_int(s)) {
 }
 ```
 
-`int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`,
+`int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`, `pop`,
 `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, `delete`,
 `substr`, `split`, `join`, `is_int`, `is_float`, `read_file`, `write_file`,
 `to_upper`, `to_lower`, `trim`, `find`, `contains`, `replace`, and `repeat` are

@@ -1,0 +1,6 @@
+# Slicing past the end aborts at runtime.
+fn main() {
+    let a = [1, 2, 3];
+    print len(a[1:9]);
+    return 0;
+}

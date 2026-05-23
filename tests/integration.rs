@@ -298,6 +298,21 @@ fn string_replace_repeat() {
     run_ok("replace_repeat");
 }
 
+#[test]
+fn slice_and_pop() {
+    run_ok("slice_pop");
+}
+
+#[test]
+fn slice_out_of_range_aborts() {
+    run_err("slice_oob", "slice out of range");
+}
+
+#[test]
+fn pop_empty_aborts() {
+    run_err("pop_empty", "pop from empty array");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {

@@ -65,6 +65,12 @@ pub enum ExprKind {
         array: Box<Expr>,
         index: Box<Expr>,
     },
+    /// スライス `seq[lo:hi]`（配列・文字列）。`lo` 省略は 0、`hi` 省略は長さ。
+    Slice {
+        seq: Box<Expr>,
+        lo: Option<Box<Expr>>,
+        hi: Option<Box<Expr>>,
+    },
     /// 構造体リテラル `Name { field: value, ... }`
     StructLit {
         name: String,
