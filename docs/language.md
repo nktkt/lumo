@@ -53,9 +53,9 @@ between numbers explicitly, use the [`int()` / `float()` built-ins](#conversions
 
 `string` values are immutable (you cannot modify one in place), but you can
 build new ones: `+` **concatenates** two strings into a fresh heap string, and
-`==` / `!=` compare strings by value. Ordering comparisons (`<`, `<=`, `>`,
-`>=`) are not defined for strings. Concatenated strings are heap-allocated and
-currently reclaimed only at program exit; see
+all comparisons (`== != < <= > >=`) work on strings — `==`/`!=` by value and the
+ordering operators lexicographically (by byte). Concatenated strings are
+heap-allocated and currently reclaimed only at program exit; see
 [RFC 0001](rfcs/0001-memory-model.md) for the planned memory management.
 
 You can read individual bytes with `s[i]`, which returns the i-th byte as an
@@ -164,8 +164,8 @@ not an error.
 ### Comparison: `== != < <= > >=`
 
 Operate on two `int`s or two `float`s of the same type and produce a `bool`.
-`==` and `!=` also compare two `string`s by value; ordering (`<`, `<=`, `>`,
-`>=`) is not defined for strings.
+They also compare two `string`s: `==`/`!=` by value, and `<`/`<=`/`>`/`>=`
+lexicographically (so an array of strings can be sorted).
 
 ```lumo
 let same = (a == 7);     # bool
