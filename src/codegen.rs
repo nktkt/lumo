@@ -759,16 +759,31 @@ impl<'ctx> CodeGen<'ctx> {
             }
             ExprKind::Index { array, index } => {
                 let (arr, arr_ty) = self.gen_expr(array);
-                let elem = match arr_ty {
-                    Type::Array(e) => e,
-                    _ => unreachable!("typeck guarantees an array here"),
-                };
-                let addr = self.elem_addr(arr.into_pointer_value(), index);
-                let v = self
-                    .builder
-                    .build_load(self.basic_ty(elem.to_type()), addr, "idx")
-                    .unwrap();
-                (v, elem.to_type())
+                match arr_ty {
+                    Type::Array(elem) => {
+                        let addr = self.elem_addr(arr.into_pointer_value(), index);
+                        let v = self
+                            .builder
+                            .build_load(self.basic_ty(elem.to_type()), addr, "idx")
+                            .unwrap();
+                        (v, elem.to_type())
+                    }
+                    // 文字列の添字: バイトを読み i64 にゼロ拡張する
+                    Type::Str => {
+                        let addr = self.str_byte_addr(arr.into_pointer_value(), index);
+                        let byte = self
+                            .builder
+                            .build_load(self.ctx.i8_type(), addr, "byte")
+                            .unwrap()
+                            .into_int_value();
+                        let v = self
+                            .builder
+                            .build_int_z_extend(byte, self.ctx.i64_type(), "byte64")
+                            .unwrap();
+                        (v.into(), Type::Int)
+                    }
+                    _ => unreachable!("typeck guarantees an array or string here"),
+                }
             }
             ExprKind::StructLit { name, fields } => {
                 let (st, def) = self.structs[name].clone();
@@ -985,19 +1000,13 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// 配列の i 番目スロットのアドレスを計算する。
     /// レイアウトは [長さ i64][8byte スロット×N] なので、要素は 8 + 8*i バイト目。
-    fn elem_addr(&mut self, base: PointerValue<'ctx>, index: &Expr) -> PointerValue<'ctx> {
-        let i64t = self.ctx.i64_type();
-        // 配列が null でないことを先に確認する
-        self.null_check(base);
-        let (idx, _) = self.gen_expr(index);
-        let idx = idx.into_int_value();
-
-        // 境界チェック: 符号なし比較 idx >= len なら範囲外（負の添字も巨大値として弾く）
-        let len = self
-            .builder
-            .build_load(i64t, base, "len")
-            .unwrap()
-            .into_int_value();
+    /// 符号なし比較 idx >= len なら範囲外として異常終了する（負の添字も巨大値として弾く）。
+    /// 失敗ブロックを作り、呼び出し後はビルダを "範囲内" ブロックに置く。
+    fn bounds_check(
+        &mut self,
+        idx: inkwell::values::IntValue<'ctx>,
+        len: inkwell::values::IntValue<'ctx>,
+    ) {
         let oob = self
             .builder
             .build_int_compare(IntPredicate::UGE, idx, len, "oob")
@@ -1008,17 +1017,53 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder
             .build_conditional_branch(oob, fail_bb, ok_bb)
             .unwrap();
-
         self.builder.position_at_end(fail_bb);
-        self.panic("lumo: array index out of bounds\n", "oob_msg");
-
+        self.panic("lumo: index out of bounds\n", "oob_msg");
         self.builder.position_at_end(ok_bb);
+    }
+
+    fn elem_addr(&mut self, base: PointerValue<'ctx>, index: &Expr) -> PointerValue<'ctx> {
+        let i64t = self.ctx.i64_type();
+        // 配列が null でないことを先に確認する
+        self.null_check(base);
+        let (idx, _) = self.gen_expr(index);
+        let idx = idx.into_int_value();
+
+        // 長さはブロック先頭の i64。境界チェックする。
+        let len = self
+            .builder
+            .build_load(i64t, base, "len")
+            .unwrap()
+            .into_int_value();
+        self.bounds_check(idx, len);
+
         let eight = i64t.const_int(8, false);
         let scaled = self.builder.build_int_mul(idx, eight, "off.mul").unwrap();
         let off = self.builder.build_int_add(scaled, eight, "off").unwrap();
         unsafe {
             self.builder
                 .build_in_bounds_gep(self.ctx.i8_type(), base, &[off], "slot")
+                .unwrap()
+        }
+    }
+
+    /// 文字列 `s` の i バイト目のアドレスを計算する（null・境界チェック付き）。
+    fn str_byte_addr(&mut self, s: PointerValue<'ctx>, index: &Expr) -> PointerValue<'ctx> {
+        self.null_check(s);
+        let (idx, _) = self.gen_expr(index);
+        let idx = idx.into_int_value();
+        let strlen = self.module.get_function("strlen").unwrap();
+        let len = self
+            .builder
+            .build_call(strlen, &[s.into()], "slen")
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_int_value();
+        self.bounds_check(idx, len);
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(self.ctx.i8_type(), s, &[idx], "byteaddr")
                 .unwrap()
         }
     }

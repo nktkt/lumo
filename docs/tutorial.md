@@ -115,6 +115,23 @@ let ready = true;     # bool
 let name = "Lumo";    # string
 ```
 
+If you'd rather be explicit, you can write the type after the name with a colon.
+This is usually optional, since Lumo can infer it:
+
+```lumo
+let count: int = 0;       # same as `let count = 0;`
+let ratio: float = 0.5;
+```
+
+There's one case where the annotation is **required**: when the initializer is
+`null`, there's nothing for Lumo to infer a type from, so you must say what it
+is (more on `null` in [null and recursive data](#null-and-recursive-data)):
+
+```lumo
+# let x = null;          # error: can't infer a type
+let x: Node = null;       # ok
+```
+
 To change a variable later, assign to it with `=`. The new value must have the
 **same type** as the original — Lumo will not let you swap an `int` for a
 `float`:
@@ -145,9 +162,19 @@ print "Tabs\tand\nnewlines";
 print "She said \"hi\"";
 ```
 
-For now, strings are **immutable literals**. You can store them in variables,
-pass them to functions, return them, and print them — but there is no string
-concatenation or string comparison yet. (Those may come later!)
+Strings are **immutable** — you can't change one in place — but you can build
+new ones. The `+` operator **concatenates** two strings into a fresh string, and
+`==` / `!=` compare two strings by value:
+
+```lumo
+let hello = "Hello, " + "Lumo";   # "Hello, Lumo"
+let same = ("abc" == "abc");      # true
+let diff = ("abc" != "xyz");      # true
+```
+
+Ordering comparisons (`<`, `<=`, `>`, `>=`) are *not* defined for strings — only
+`==` and `!=`. And to splice a number or `bool` into a string, convert it with
+`str(...)` first (see [Built-in functions](#built-in-functions) below).
 
 ### Try it
 
@@ -423,6 +450,242 @@ FizzBuzz
 
 ---
 
+## Arrays
+
+When you need a *sequence* of values, reach for an **array**. An array holds many
+values of the same type. Its type is written `[T]` — `[int]` is an array of
+ints, `[string]` an array of strings, and so on (`T` can be `int`, `float`,
+`bool`, or `string`).
+
+Write an array with square brackets and commas. Lumo infers the element type
+from the values, so all elements must be the same type:
+
+```lumo
+let xs = [10, 20, 30];        # type [int]
+let names = ["ann", "bob"];   # type [string]
+```
+
+Read an element with `a[i]` (indices start at `0`), and write one by assigning to
+it. Use the built-in `len(a)` to get the number of elements:
+
+```lumo
+let xs = [10, 20, 30];
+print xs[0];        # 10
+xs[1] = 99;         # write to the element at index 1
+print xs[1];        # 99
+print len(xs);      # 3
+```
+
+Indexing is **bounds-checked**. If you reach past the end of the array (or use a
+negative index), Lumo doesn't read garbage memory — instead the program stops
+right away with `lumo: array index out of bounds` and a non-zero exit status.
+
+### Worked example: summing an array
+
+Walk the array by index, adding each element to a running total:
+
+```lumo
+fn sum(ns: [int]) -> int {
+    let total = 0;
+    for (let i = 0; i < len(ns); i = i + 1) {
+        total = total + ns[i];
+    }
+    return total;
+}
+
+fn main() {
+    let nums = [4, 8, 15, 16, 23, 42];
+    print sum(nums);    # 108
+    return 0;
+}
+```
+
+Notice that arrays make perfectly good parameter and return types, so you can
+hand them off to functions just like any other value.
+
+---
+
+## Structs
+
+An array groups values of the *same* type. A **struct** groups values of
+*different* types under named fields — a handy way to bundle related data into
+one thing. You declare a struct at the top level, next to your functions:
+
+```lumo
+struct Point {
+    x: int,
+    y: int,
+}
+```
+
+To create one, name the struct and give every field a value (each field exactly
+once; the order doesn't matter):
+
+```lumo
+let p = Point { x: 3, y: 4 };
+```
+
+Read a field with `p.x`, and write one by assigning to it:
+
+```lumo
+print p.x;     # 3
+p.y = 10;      # update a field
+print p.y;     # 10
+```
+
+Structs work as parameter and return types, so you can pass them to functions:
+
+```lumo
+fn dist_sq(p: Point) -> int {
+    return p.x * p.x + p.y * p.y;
+}
+
+fn main() {
+    let p = Point { x: 3, y: 4 };
+    print dist_sq(p);   # 25
+    return 0;
+}
+```
+
+### Nesting
+
+A struct field can itself be a struct, so structs can **nest**:
+
+```lumo
+struct Rect {
+    lo: Point,
+    hi: Point,
+}
+
+fn main() {
+    let r = Rect {
+        lo: Point { x: 0, y: 0 },
+        hi: Point { x: 4, y: 3 },
+    };
+    let w = r.hi.x - r.lo.x;   # reach through both levels
+    let h = r.hi.y - r.lo.y;
+    print w * h;               # 12 (area)
+    return 0;
+}
+```
+
+One thing worth knowing: structs are handled **by reference**. If two variables
+are bound to the same struct, they refer to the *same* data — change a field
+through one and you'll see the change through the other.
+
+---
+
+## null and recursive data
+
+Reference types — strings, arrays, and structs — can also hold a special "empty"
+value called `null`. This is what lets a struct point to *another* struct (or to
+nothing), which is exactly what you need for recursive shapes like linked lists
+and trees.
+
+You can assign or pass `null` anywhere a reference type is expected, and compare
+against it with `==` and `!=`:
+
+```lumo
+if (node == null) { print "empty"; }
+if (s != null)    { print s; }
+```
+
+Because `null` carries no type of its own, a bare `let x = null;` won't compile —
+give the variable a type annotation so Lumo knows what it is:
+
+```lumo
+let next: Node = null;
+```
+
+### Worked example: a linked list
+
+A **self-referential** struct has a field of its own type. Here each `Node`
+holds a value and a link to the `next` node; a `null` link marks the end of the
+list:
+
+```lumo
+struct Node {
+    val: int,
+    next: Node,
+}
+
+fn length(list: Node) -> int {
+    if (list == null) {        # reached the end
+        return 0;
+    }
+    return 1 + length(list.next);
+}
+
+fn main() {
+    # build  1 -> 2 -> 3 -> null
+    let list = Node {
+        val: 1,
+        next: Node {
+            val: 2,
+            next: Node { val: 3, next: null },
+        },
+    };
+    print length(list);   # 3
+    return 0;
+}
+```
+
+The `length` function **traverses** the list by recursion: it stops at the
+`null` terminator and otherwise counts one node plus the length of the rest.
+
+A word of caution: reading a field through a `null` reference (say `node.val`
+when `node` is `null`) is a mistake. Lumo catches it at runtime — the program
+stops with `lumo: null reference` and a non-zero exit status — so check for
+`null` before you follow a link.
+
+---
+
+## Built-in functions
+
+Lumo comes with a handful of built-in functions. They look like ordinary calls,
+but their names (`len`, `int`, `float`, `str`) are reserved — you can't define
+your own function with one of these names.
+
+### `len` — length of a string or array
+
+`len(x)` returns an `int`: the number of bytes in a string, or the number of
+elements in an array.
+
+```lumo
+print len("hello");     # 5
+print len([1, 2, 3]);   # 3
+```
+
+### `int` and `float` — numeric conversions
+
+Lumo never converts between `int` and `float` on its own, so when you need to
+mix them you ask explicitly:
+
+- `float(i)` turns an `int` into a `float`.
+- `int(f)` turns a `float` into an `int`, truncating toward zero.
+
+```lumo
+let total = 7;
+let count = 2;
+print float(total) / float(count);   # 3.5  (float division)
+print int(3.9);                      # 3    (truncates)
+```
+
+### `str` — turn a value into a string
+
+`str(x)` converts an `int`, `float`, or `bool` into a `string` (and a `string`
+passes through unchanged). Combined with `+`, this is how you build messages out
+of values:
+
+```lumo
+let n = 42;
+print "n = " + str(n);        # n = 42
+print "pi ~ " + str(3.14);    # pi ~ 3.14
+print "ready? " + str(true);  # ready? true
+```
+
+---
+
 ## When things go wrong
 
 Lumo is strict on purpose: catching mistakes at compile time means fewer
@@ -459,7 +722,9 @@ seen a code a few times you'll recognize the category at a glance.
 
 ## Where to go next
 
-You now know enough Lumo to write real programs. From here:
+You now know enough Lumo to write real programs — values and operators, control
+flow, functions, arrays, structs, recursive data with `null`, and the built-in
+helpers. From here:
 
 - **[`docs/language.md`](language.md)** — the language **reference**: every type,
   operator, statement, precedence table, and the formal grammar.

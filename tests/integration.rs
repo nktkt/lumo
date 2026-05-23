@@ -165,6 +165,11 @@ fn stringify() {
     run_ok("stringify");
 }
 
+#[test]
+fn string_index() {
+    run_ok("string_index");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -339,4 +344,9 @@ fn err_let_null() {
 #[test]
 fn err_str_struct() {
     run_err("err_str_struct", "E0200");
+}
+
+#[test]
+fn err_string_assign() {
+    run_err("err_string_assign", "E0207");
 }
