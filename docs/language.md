@@ -42,8 +42,8 @@ Lumo has four primitive types and two compound types:
 - `bool` — either `true` or `false`
 - `float` — 64-bit IEEE double
 - `string` — an immutable text value
-- `[T]` — an array of `T`, where `T` is `int`, `bool`, `float`, or `string`
-  (see [Arrays](#arrays))
+- `[T]` — an array of `T`, where `T` is `int`, `bool`, `float`, `string`, or a
+  struct (see [Arrays](#arrays))
 - a user-defined `struct` (see [Structs](#structs))
 
 There are **no implicit conversions** between types. An `int` is never
@@ -277,8 +277,8 @@ fn odd(n: int) -> bool {
 
 ## Arrays
 
-An array type is written `[T]` where `T` is a scalar (`int`, `bool`, `float`, or
-`string`). Arrays of arrays are not supported yet.
+An array type is written `[T]` where `T` is `int`, `bool`, `float`, `string`, or
+a struct (e.g. `[Point]`). Arrays of arrays are not supported yet.
 
 - **Literal:** `[e1, e2, ...]` — at least one element, all the same type. The
   element type is inferred. (There is no empty-array literal yet.)
@@ -333,8 +333,9 @@ struct Rect { lo: Point, hi: Point }   # structs can contain structs
 
 Structs are heap-allocated and assigned by reference (two variables bound to the
 same struct value alias the same data). Like other heap values they are
-reclaimed only at program exit; see [RFC 0001](rfcs/0001-memory-model.md).
-Arrays of structs are not supported yet.
+reclaimed only at program exit; see [RFC 0001](rfcs/0001-memory-model.md). An
+array of structs (`[Point]`) is allowed; indexing yields the struct, so
+`ps[i].x` reads and `ps[i].x = v;` mutates it in place.
 
 ## null
 

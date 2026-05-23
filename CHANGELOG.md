@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.17.0]
+
+### Added
+
+- Arrays of structs: an array element type may now be a struct (e.g. `[Point]`). Indexing yields the struct by reference, so `ps[i].x` reads and `ps[i].x = v;` mutates in place.
+- Trailing commas are now allowed in array literals (matching struct literals/defs).
+
 ## [0.16.0]
 
 ### Added

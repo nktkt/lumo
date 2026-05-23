@@ -1,6 +1,6 @@
 //! Lumo の値の型。型検査(typeck)とコード生成(codegen)で共有する。
 
-/// 配列の要素型（スカラのみ。入れ子の配列は今のところ非対応）。
+/// 配列の要素型（スカラと構造体。配列の配列は今のところ非対応）。
 /// これにより [`Type`] が `Box` 無しで `Copy` のままでいられる。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Elem {
@@ -8,15 +8,17 @@ pub enum Elem {
     Bool,
     Float,
     Str,
+    Struct(&'static str),
 }
 
 impl Elem {
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
         match self {
-            Elem::Int => "int",
-            Elem::Bool => "bool",
-            Elem::Float => "float",
-            Elem::Str => "string",
+            Elem::Int => "int".to_string(),
+            Elem::Bool => "bool".to_string(),
+            Elem::Float => "float".to_string(),
+            Elem::Str => "string".to_string(),
+            Elem::Struct(n) => n.to_string(),
         }
     }
 
@@ -26,6 +28,7 @@ impl Elem {
             Elem::Bool => Type::Bool,
             Elem::Float => Type::Float,
             Elem::Str => Type::Str,
+            Elem::Struct(n) => Type::Struct(n),
         }
     }
 }
@@ -76,7 +79,9 @@ impl Type {
             Type::Bool => Some(Elem::Bool),
             Type::Float => Some(Elem::Float),
             Type::Str => Some(Elem::Str),
-            Type::Array(_) | Type::Struct(_) | Type::Null => None,
+            Type::Struct(n) => Some(Elem::Struct(n)),
+            // 配列の配列・null は要素型にできない
+            Type::Array(_) | Type::Null => None,
         }
     }
 }

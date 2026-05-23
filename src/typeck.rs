@@ -20,9 +20,14 @@ struct Sig {
 /// 構造体名 -> フィールド（定義順の (名前, 型)）
 type Structs = HashMap<String, Vec<(String, Type)>>;
 
-/// 型が実在する型を指すか検証する（構造体名が定義済みか）。
+/// 型が実在する型を指すか検証する（構造体名が定義済みか。配列の要素も見る）。
 fn validate_type(t: Type, structs: &Structs, span: Span) -> Result<(), Diagnostic> {
-    if let Type::Struct(n) = t {
+    let struct_name = match t {
+        Type::Struct(n) => Some(n),
+        Type::Array(crate::types::Elem::Struct(n)) => Some(n),
+        _ => None,
+    };
+    if let Some(n) = struct_name {
         if !structs.contains_key(n) {
             return Err(Diagnostic::error(format!("不明な型: {}", n))
                 .with_code("E0300")

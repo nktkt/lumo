@@ -161,6 +161,11 @@ fn linked_list() {
 }
 
 #[test]
+fn array_structs() {
+    run_ok("array_structs");
+}
+
+#[test]
 fn stringify() {
     run_ok("stringify");
 }

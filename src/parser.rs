@@ -526,6 +526,10 @@ impl Parser {
                         elems.push(self.parse_expr()?);
                         if self.peek() == &Tok::Comma {
                             self.next();
+                            // 末尾カンマを許す
+                            if self.peek() == &Tok::RBracket {
+                                break;
+                            }
                         } else {
                             break;
                         }

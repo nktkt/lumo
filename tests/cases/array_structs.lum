@@ -1,0 +1,26 @@
+# arrays of structs: [Point] literals, indexing to a struct, field mutation
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn total_x(ps: [Point]) -> int {
+    let sum = 0;
+    for (let i = 0; i < len(ps); i = i + 1) {
+        sum = sum + ps[i].x;
+    }
+    return sum;
+}
+
+fn main() {
+    let ps = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }, Point { x: 10, y: 20 }];
+    print len(ps);          # 3
+    print ps[0].x;          # 1
+    print ps[2].y;          # 20
+    print total_x(ps);      # 14
+    ps[1] = Point { x: 99, y: 0 };   # replace an element
+    print ps[1].x;          # 99
+    ps[0].x = 100;          # mutate a field through an array element
+    print ps[0].x;          # 100
+    return 0;
+}

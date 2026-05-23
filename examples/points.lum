@@ -1,0 +1,33 @@
+# Arrays of structs (Phase 17 / v0.17) — collections of records.
+#
+# An array element type can be a struct: `[Point]`. Indexing yields the struct
+# (a reference), so `ps[i].x` reads and `ps[i].x = v` mutates in place.
+
+struct Point {
+    x: float,
+    y: float,
+}
+
+# centroid (average position) of a list of points
+fn centroid(ps: [Point]) -> Point {
+    let sx = 0.0;
+    let sy = 0.0;
+    let n = len(ps);
+    for (let i = 0; i < n; i = i + 1) {
+        sx = sx + ps[i].x;
+        sy = sy + ps[i].y;
+    }
+    return Point { x: sx / float(n), y: sy / float(n) };
+}
+
+fn main() {
+    let ps = [
+        Point { x: 0.0, y: 0.0 },
+        Point { x: 4.0, y: 0.0 },
+        Point { x: 2.0, y: 6.0 },
+    ];
+    let c = centroid(ps);
+    print "centroid x = " + str(c.x);   # 2
+    print "centroid y = " + str(c.y);   # 2
+    return 0;
+}
