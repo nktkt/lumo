@@ -323,6 +323,8 @@ arrays nest (`[[int]]`, a matrix) and can hold maps (`[{string: int}]`). See
 - **Length:** `len(a)` returns the number of elements as an `int`.
 - **Grow:** `push(a, x)` appends `x` and returns the array (see below).
 - **Shrink:** `pop(a)` removes the last element and returns it (see below).
+- **Reorder:** `sorted(a)` / `reversed(a)` return a new sorted/reversed array
+  (the original is unchanged — see [Sorting and reversing](#sorting-and-reversing)).
 
 ```lumo
 let xs = [10, 20, 30];
@@ -403,6 +405,27 @@ Slicing is **bounds-checked like `substr`**: it requires `0 <= lo <= hi <= len`,
 and otherwise aborts (`lumo: slice out of range`, exit 101). An array slice is a
 copy, so mutating it does not affect the original. (A string slice is exactly
 `substr(s, lo, hi - lo)`.)
+
+### Sorting and reversing
+
+- **`sorted(a)`** returns a **new** array with the elements in ascending order.
+  The element type must be `int`, `float`, or `string` (the types with a defined
+  order); ints/floats compare numerically, strings lexicographically by byte.
+- **`reversed(a)`** returns a **new** array with the elements in reverse order,
+  for **any** element type.
+
+Both leave the original array untouched (unlike `push`/`pop`, which mutate in
+place). A descending sort is `reversed(sorted(a))`.
+
+```lumo
+let xs = [3, 1, 2];
+print sorted(xs)[0];                # 1
+print reversed(sorted(xs))[0];      # 3   (largest first)
+print xs[0];                        # 3   (xs itself is unchanged)
+
+let words = ["pear", "apple", "kiwi"];
+for (w in sorted(words)) { print w; }   # apple / kiwi / pear
+```
 
 ## Maps
 
@@ -600,10 +623,10 @@ if (is_int(s)) {
 ```
 
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`, `pop`,
-`sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, `delete`,
-`substr`, `split`, `join`, `is_int`, `is_float`, `read_file`, `write_file`,
-`to_upper`, `to_lower`, `trim`, `find`, `contains`, `replace`, and `repeat` are
-reserved names — you cannot define a function with one of them.
+`sorted`, `reversed`, `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`,
+`keys`, `delete`, `substr`, `split`, `join`, `is_int`, `is_float`, `read_file`,
+`write_file`, `to_upper`, `to_lower`, `trim`, `find`, `contains`, `replace`, and
+`repeat` are reserved names — you cannot define a function with one of them.
 
 ### `read_line`
 

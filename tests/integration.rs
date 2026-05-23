@@ -304,6 +304,11 @@ fn slice_and_pop() {
 }
 
 #[test]
+fn sorted_and_reversed() {
+    run_ok("sorted_reversed");
+}
+
+#[test]
 fn slice_out_of_range_aborts() {
     run_err("slice_oob", "slice out of range");
 }

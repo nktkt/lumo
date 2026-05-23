@@ -307,9 +307,11 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_array_runtime();
     }
 
-    /// 配列ランタイム。今は `lumo_array_slice` のみ。
+    /// 配列ランタイム: スライス・ソート(libc qsort + 型別コンパレータ)・反転。
     fn declare_array_runtime(&mut self) {
         let i64t = self.ctx.i64_type();
+        let i32t = self.ctx.i32_type();
+        let f64t = self.ctx.f64_type();
         let i8t = self.ctx.i8_type();
         let ptr = self.ctx.ptr_type(AddressSpace::default());
 
@@ -387,6 +389,289 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder.build_unconditional_branch(fin_bb).unwrap();
             self.builder.position_at_end(fin_bb);
             self.builder.build_return(Some(&newhdr)).unwrap();
+        }
+
+        // libc: void qsort(void* base, size_t n, size_t size, int(*cmp)(const void*, const void*))
+        self.module.add_function(
+            "qsort",
+            self.ctx
+                .void_type()
+                .fn_type(&[ptr.into(), i64t.into(), i64t.into(), ptr.into()], false),
+            Some(Linkage::External),
+        );
+
+        // 型別コンパレータ。qsort は 8byte スロット2つ(へのポインタ)を渡す。
+        // int: i64 を符号付き比較して -1/0/1 を返す。
+        let cmp_int = self.module.add_function(
+            "lumo_cmp_int",
+            i32t.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(cmp_int, "entry");
+            self.builder.position_at_end(entry);
+            let pa = cmp_int.get_nth_param(0).unwrap().into_pointer_value();
+            let pb = cmp_int.get_nth_param(1).unwrap().into_pointer_value();
+            let a = self
+                .builder
+                .build_load(i64t, pa, "a")
+                .unwrap()
+                .into_int_value();
+            let b = self
+                .builder
+                .build_load(i64t, pb, "b")
+                .unwrap()
+                .into_int_value();
+            let lt = self
+                .builder
+                .build_int_compare(IntPredicate::SLT, a, b, "lt")
+                .unwrap();
+            let gt = self
+                .builder
+                .build_int_compare(IntPredicate::SGT, a, b, "gt")
+                .unwrap();
+            let pos = self
+                .builder
+                .build_select(gt, i32t.const_int(1, false), i32t.const_zero(), "pos")
+                .unwrap()
+                .into_int_value();
+            let r = self
+                .builder
+                .build_select(lt, i32t.const_all_ones(), pos, "r")
+                .unwrap();
+            self.builder.build_return(Some(&r)).unwrap();
+        }
+
+        // float: f64 を比較して -1/0/1。
+        let cmp_float = self.module.add_function(
+            "lumo_cmp_float",
+            i32t.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(cmp_float, "entry");
+            self.builder.position_at_end(entry);
+            let pa = cmp_float.get_nth_param(0).unwrap().into_pointer_value();
+            let pb = cmp_float.get_nth_param(1).unwrap().into_pointer_value();
+            let a = self
+                .builder
+                .build_load(f64t, pa, "a")
+                .unwrap()
+                .into_float_value();
+            let b = self
+                .builder
+                .build_load(f64t, pb, "b")
+                .unwrap()
+                .into_float_value();
+            let lt = self
+                .builder
+                .build_float_compare(inkwell::FloatPredicate::OLT, a, b, "lt")
+                .unwrap();
+            let gt = self
+                .builder
+                .build_float_compare(inkwell::FloatPredicate::OGT, a, b, "gt")
+                .unwrap();
+            let pos = self
+                .builder
+                .build_select(gt, i32t.const_int(1, false), i32t.const_zero(), "pos")
+                .unwrap()
+                .into_int_value();
+            let r = self
+                .builder
+                .build_select(lt, i32t.const_all_ones(), pos, "r")
+                .unwrap();
+            self.builder.build_return(Some(&r)).unwrap();
+        }
+
+        // string: スロットは文字列ポインタ。それぞれをロードして strcmp。
+        let cmp_str = self.module.add_function(
+            "lumo_cmp_str",
+            i32t.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(cmp_str, "entry");
+            self.builder.position_at_end(entry);
+            let pa = cmp_str.get_nth_param(0).unwrap().into_pointer_value();
+            let pb = cmp_str.get_nth_param(1).unwrap().into_pointer_value();
+            let sa = self
+                .builder
+                .build_load(ptr, pa, "sa")
+                .unwrap()
+                .into_pointer_value();
+            let sb = self
+                .builder
+                .build_load(ptr, pb, "sb")
+                .unwrap()
+                .into_pointer_value();
+            let strcmp = self.module.get_function("strcmp").unwrap();
+            let r = self
+                .builder
+                .build_call(strcmp, &[sa.into(), sb.into()], "r")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic();
+            self.builder.build_return(Some(&r)).unwrap();
+        }
+
+        // --- ptr lumo_array_sort(ptr hdr, ptr cmp): 昇順に並べ替えた新規配列 ---
+        // 元配列をコピーしてから data ブロックを qsort する（非破壊）。
+        let sort_fn = self.module.add_function(
+            "lumo_array_sort",
+            ptr.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(sort_fn, "entry");
+            self.builder.position_at_end(entry);
+            let hdr = sort_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let cmp = sort_fn.get_nth_param(1).unwrap().into_pointer_value();
+            let len = self
+                .builder
+                .build_load(i64t, hdr, "len")
+                .unwrap()
+                .into_int_value();
+            let slice = self.module.get_function("lumo_array_slice").unwrap();
+            let copy = self
+                .builder
+                .build_call(
+                    slice,
+                    &[hdr.into(), i64t.const_zero().into(), len.into()],
+                    "copy",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let data = self
+                .builder
+                .build_load(ptr, self.hdr_field(copy, 16), "data")
+                .unwrap()
+                .into_pointer_value();
+            let qsort = self.module.get_function("qsort").unwrap();
+            self.builder
+                .build_call(
+                    qsort,
+                    &[
+                        data.into(),
+                        len.into(),
+                        i64t.const_int(8, false).into(),
+                        cmp.into(),
+                    ],
+                    "",
+                )
+                .unwrap();
+            self.builder.build_return(Some(&copy)).unwrap();
+        }
+
+        // --- ptr lumo_array_reverse(ptr hdr): 要素を逆順にした新規配列 ---
+        // コピーしてから data の 8byte スロットを両端から入れ替える。
+        let rev_fn = self.module.add_function(
+            "lumo_array_reverse",
+            ptr.fn_type(&[ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(rev_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(rev_fn, "loop");
+            let body_bb = self.ctx.append_basic_block(rev_fn, "body");
+            let fin_bb = self.ctx.append_basic_block(rev_fn, "fin");
+            self.builder.position_at_end(entry);
+            let hdr = rev_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let len = self
+                .builder
+                .build_load(i64t, hdr, "len")
+                .unwrap()
+                .into_int_value();
+            let slice = self.module.get_function("lumo_array_slice").unwrap();
+            let copy = self
+                .builder
+                .build_call(
+                    slice,
+                    &[hdr.into(), i64t.const_zero().into(), len.into()],
+                    "copy",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let data = self
+                .builder
+                .build_load(ptr, self.hdr_field(copy, 16), "data")
+                .unwrap()
+                .into_pointer_value();
+            // i=0, j=len-1; while i<j swap slots; i++, j--
+            let i_ptr = self.builder.build_alloca(i64t, "i").unwrap();
+            let j_ptr = self.builder.build_alloca(i64t, "j").unwrap();
+            self.builder.build_store(i_ptr, i64t.const_zero()).unwrap();
+            let lenm1 = self
+                .builder
+                .build_int_sub(len, i64t.const_int(1, false), "lenm1")
+                .unwrap();
+            self.builder.build_store(j_ptr, lenm1).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(loop_bb);
+            let iv = self
+                .builder
+                .build_load(i64t, i_ptr, "i")
+                .unwrap()
+                .into_int_value();
+            let jv = self
+                .builder
+                .build_load(i64t, j_ptr, "j")
+                .unwrap()
+                .into_int_value();
+            let go = self
+                .builder
+                .build_int_compare(IntPredicate::SLT, iv, jv, "go")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(go, body_bb, fin_bb)
+                .unwrap();
+            self.builder.position_at_end(body_bb);
+            let ioff = self
+                .builder
+                .build_int_mul(iv, i64t.const_int(8, false), "ioff")
+                .unwrap();
+            let joff = self
+                .builder
+                .build_int_mul(jv, i64t.const_int(8, false), "joff")
+                .unwrap();
+            let ia = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, data, &[ioff], "ia")
+                    .unwrap()
+            };
+            let ja = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, data, &[joff], "ja")
+                    .unwrap()
+            };
+            let vi = self
+                .builder
+                .build_load(i64t, ia, "vi")
+                .unwrap()
+                .into_int_value();
+            let vj = self
+                .builder
+                .build_load(i64t, ja, "vj")
+                .unwrap()
+                .into_int_value();
+            self.builder.build_store(ia, vj).unwrap();
+            self.builder.build_store(ja, vi).unwrap();
+            let inext = self
+                .builder
+                .build_int_add(iv, i64t.const_int(1, false), "inext")
+                .unwrap();
+            let jprev = self
+                .builder
+                .build_int_sub(jv, i64t.const_int(1, false), "jprev")
+                .unwrap();
+            self.builder.build_store(i_ptr, inext).unwrap();
+            self.builder.build_store(j_ptr, jprev).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(fin_bb);
+            self.builder.build_return(Some(&copy)).unwrap();
         }
     }
 
@@ -3847,6 +4132,48 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_load(self.basic_ty(elem.to_type()), slot, "popped")
                     .unwrap();
                 (v, elem.to_type())
+            }
+            ExprKind::Call { name, args } if name == "sorted" => {
+                // sorted(a): コピーして qsort。コンパレータは要素型で選ぶ。
+                let (av, arr_ty) = self.gen_expr(&args[0]);
+                let hdr = av.into_pointer_value();
+                self.null_check(hdr);
+                let Type::Array(elem) = arr_ty else {
+                    unreachable!("typeck guarantees an array here");
+                };
+                let cmp_name = match elem.to_type() {
+                    Type::Int => "lumo_cmp_int",
+                    Type::Float => "lumo_cmp_float",
+                    Type::Str => "lumo_cmp_str",
+                    _ => unreachable!("typeck restricts sorted to int/float/string"),
+                };
+                let cmp = self
+                    .module
+                    .get_function(cmp_name)
+                    .unwrap()
+                    .as_global_value()
+                    .as_pointer_value();
+                let f = self.module.get_function("lumo_array_sort").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[hdr.into(), cmp.into()], "sorted")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, arr_ty)
+            }
+            ExprKind::Call { name, args } if name == "reversed" => {
+                let (av, arr_ty) = self.gen_expr(&args[0]);
+                let hdr = av.into_pointer_value();
+                self.null_check(hdr);
+                let f = self.module.get_function("lumo_array_reverse").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[hdr.into()], "reversed")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, arr_ty)
             }
             ExprKind::Call { name, .. } if name == "read_line" => {
                 // stdin から1行読む。EOF なら null、そうでなければ末尾改行を取り除いた文字列。

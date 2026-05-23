@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.33.0]
+
+### Added
+
+- **Array `sorted` and `reversed`** (non-mutating, return a new array):
+  - `sorted(a)` → a new array in ascending order. The element type must be `int`, `float`, or `string` (numbers compare numerically, strings lexicographically). A descending sort is `reversed(sorted(a))`.
+  - `reversed(a)` → a new array with the elements in reverse order, for any element type.
+- `examples/leaderboard.lum`: rank scores with `sorted` / `reversed` + slicing.
+
+### Changed
+
+- `examples/wordcount.lum` now uses `sorted(keys(counts))` instead of a hand-written insertion sort.
+
+### Notes
+
+- `sorted` is implemented with libc `qsort` plus a per-element-type comparator generated in IR; both reuse the array-slice runtime to copy first, so the original array is never modified.
+
 ## [0.32.0]
 
 ### Added

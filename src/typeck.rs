@@ -953,6 +953,59 @@ impl FnChecker<'_> {
                     return Ok(elem.to_type());
                 }
 
+                // reversed(a): 要素を逆順にした新しい配列（どんな要素型でも可）。
+                if name == "reversed" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "reversed() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let arr_ty = self.check_expr(&args[0])?;
+                    if !matches!(arr_ty, Type::Array(_)) {
+                        return Err(Diagnostic::error(format!(
+                            "reversed() の第1引数は配列ですが {} が渡されました",
+                            arr_ty.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    return Ok(arr_ty);
+                }
+
+                // sorted(a): 昇順に並べ替えた新しい配列。要素は int/float/string のみ
+                // （順序が定義された型）。降順が要るなら reversed(sorted(a))。
+                if name == "sorted" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "sorted() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let arr_ty = self.check_expr(&args[0])?;
+                    let Type::Array(elem) = arr_ty else {
+                        return Err(Diagnostic::error(format!(
+                            "sorted() の第1引数は配列ですが {} が渡されました",
+                            arr_ty.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    };
+                    if !matches!(elem.to_type(), Type::Int | Type::Float | Type::Str) {
+                        return Err(Diagnostic::error(format!(
+                            "sorted() で並べ替えられるのは int/float/string の配列だけですが {} が渡されました",
+                            arr_ty.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    return Ok(arr_ty);
+                }
+
                 let (param_types, ret) = {
                     let sig = self.sigs.get(name).ok_or_else(|| {
                         Diagnostic::error(format!("未定義の関数: {}", name))
@@ -1171,6 +1224,8 @@ fn is_reserved_name(name: &str) -> bool {
             | "read_line"
             | "push"
             | "pop"
+            | "sorted"
+            | "reversed"
             | "sqrt"
             | "pow"
             | "abs"
