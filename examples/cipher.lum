@@ -1,0 +1,24 @@
+# chr() (Phase 18 / v0.18) — build strings from bytes.
+#
+# chr(b) returns a 1-character string for byte value b. With s[i] (read a byte)
+# and + (concatenate), you can transform strings. Here: a Caesar cipher.
+
+fn caesar(s: string, k: int) -> string {
+    let out = "";
+    for (let i = 0; i < len(s); i = i + 1) {
+        let c = s[i];
+        if (c >= 97 && c <= 122) {           # shift lowercase letters
+            c = (c - 97 + k) % 26 + 97;
+        }
+        out = out + chr(c);
+    }
+    return out;
+}
+
+fn main() {
+    let msg = "hello, lumo";
+    let enc = caesar(msg, 3);
+    print enc;                  # khoor, oxpr
+    print caesar(enc, 23);      # decrypt (26 - 3): hello, lumo
+    return 0;
+}

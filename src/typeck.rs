@@ -487,6 +487,21 @@ impl FnChecker<'_> {
                     return Ok(Type::Int);
                 }
 
+                // 組み込み chr(): バイト値(int)を1文字の文字列にする
+                if name == "chr" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "chr() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let at = self.check_expr(&args[0])?;
+                    expect(Type::Int, at, args[0].span)?;
+                    return Ok(Type::Str);
+                }
+
                 // 組み込み str(): int/float/bool/string を文字列にする
                 if name == "str" {
                     if args.len() != 1 {
@@ -663,7 +678,10 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
 
 /// 型名・組み込み関数名として予約されている識別子か（関数名に使えない）。
 fn is_reserved_name(name: &str) -> bool {
-    matches!(name, "int" | "float" | "bool" | "string" | "len" | "str")
+    matches!(
+        name,
+        "int" | "float" | "bool" | "string" | "len" | "str" | "chr"
+    )
 }
 
 fn numeric_required(got: Type, span: Span) -> Diagnostic {

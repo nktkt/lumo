@@ -405,8 +405,29 @@ print float(total) / float(count);  # 3.5  (float division)
 print int(3.9);                     # 3    (truncates)
 ```
 
-`int`, `float`, `bool`, `string`, `len`, and `str` are reserved names — you
-cannot define a function with one of them.
+`int`, `float`, `bool`, `string`, `len`, `str`, and `chr` are reserved names —
+you cannot define a function with one of them.
+
+### `chr`
+
+`chr(b)` returns a one-character `string` for the byte value `b` (an `int`,
+taken modulo 256). It is the inverse of [string indexing](#types): with `s[i]`
+to read bytes and `+` to concatenate, you can transform strings.
+
+```lumo
+print chr(65);   # A
+
+fn upper(s: string) -> string {
+    let r = "";
+    for (let i = 0; i < len(s); i = i + 1) {
+        let c = s[i];
+        if (c >= 97 && c <= 122) { c = c - 32; }
+        r = r + chr(c);
+    }
+    return r;
+}
+print upper("hi");   # HI
+```
 
 ### `len`
 

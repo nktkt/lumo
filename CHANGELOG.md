@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.18.0]
+
+### Added
+
+- `chr(b)` built-in: returns a one-character string for a byte value (int). Together with `s[i]` and `+`, this completes string manipulation (e.g. uppercasing, reversing, ciphers).
+
 ## [0.17.0]
 
 ### Added
