@@ -472,6 +472,28 @@ impl FnChecker<'_> {
                     return Ok(Type::Int);
                 }
 
+                // 組み込み str(): int/float/bool/string を文字列にする
+                if name == "str" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "str() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let at = self.check_expr(&args[0])?;
+                    if !matches!(at, Type::Int | Type::Float | Type::Bool | Type::Str) {
+                        return Err(Diagnostic::error(format!(
+                            "str() は int/float/bool/string を変換しますが {} が渡されました",
+                            at.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    return Ok(Type::Str);
+                }
+
                 let (param_types, ret) = {
                     let sig = self.sigs.get(name).ok_or_else(|| {
                         Diagnostic::error(format!("未定義の関数: {}", name))
@@ -624,7 +646,7 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
 
 /// 型名・組み込み関数名として予約されている識別子か（関数名に使えない）。
 fn is_reserved_name(name: &str) -> bool {
-    matches!(name, "int" | "float" | "bool" | "string" | "len")
+    matches!(name, "int" | "float" | "bool" | "string" | "len" | "str")
 }
 
 fn numeric_required(got: Type, span: Span) -> Diagnostic {

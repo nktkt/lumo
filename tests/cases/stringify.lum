@@ -1,0 +1,12 @@
+# str(): turn int / float / bool / string into a string, then build messages
+fn main() {
+    print "answer = " + str(42);     # answer = 42
+    print str(-7);                   # -7
+    print "pi ~ " + str(3.14);       # pi ~ 3.14
+    print "ok? " + str(2 + 2 == 4);  # ok? true
+    print "no: " + str(1 > 2);       # no: false
+    let n = 100;
+    print "n is " + str(n) + "!";    # n is 100!
+    print str("passthrough");        # passthrough
+    return 0;
+}
