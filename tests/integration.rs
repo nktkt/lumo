@@ -258,6 +258,16 @@ fn for_in_loops() {
     run_ok("for_in");
 }
 
+#[test]
+fn string_toolkit() {
+    run_ok("string_ops");
+}
+
+#[test]
+fn substr_out_of_range_aborts() {
+    run_err("substr_oob", "substr out of range");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {

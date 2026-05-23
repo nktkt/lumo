@@ -1,0 +1,5 @@
+# substr out of range aborts at runtime.
+fn main() {
+    print substr("hi", 0, 99);
+    return 0;
+}

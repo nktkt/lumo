@@ -492,8 +492,9 @@ print int(3.9);                     # 3    (truncates)
 ```
 
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`,
-`sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, and `delete`
-are reserved names — you cannot define a function with one of them.
+`sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, `delete`,
+`substr`, `split`, and `join` are reserved names — you cannot define a function
+with one of them.
 
 ### `read_line`
 
@@ -531,6 +532,32 @@ fn upper(s: string) -> string {
 }
 print upper("hi");   # HI
 ```
+
+### `substr` / `split` / `join`
+
+The string toolkit for slicing and parsing text:
+
+- **`substr(s, start, count)`** → the substring of `count` bytes starting at byte
+  `start`. Aborts at runtime (`lumo: substr out of range`) if `start`/`count` are
+  negative or run past the end.
+- **`split(s, sep)`** → a `[string]` of the pieces of `s` separated by `sep`.
+  Consecutive or edge separators produce empty pieces (`split(",a,", ",")` is
+  `["", "a", ""]`); an empty `sep` returns `[s]`.
+- **`join(parts, sep)`** → a `string`: the inverse of `split`, concatenating a
+  `[string]` with `sep` between elements.
+
+```lumo
+print substr("hello world", 6, 5);     # world
+
+let fields = split("a,b,c", ",");      # ["a", "b", "c"]
+for (f in fields) { print f; }
+
+print join(fields, " | ");             # a | b | c
+print join(split("x-y-z", "-"), "+");  # x+y+z  (round trip)
+```
+
+Note: parsing a string to a number is not built in — `int()` only converts
+`float`→`int`. Write a small helper that scans digits (see `examples/csv.lum`).
 
 ### `len`
 

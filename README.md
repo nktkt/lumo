@@ -54,19 +54,19 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.25, in progress)
+## Language (v0.26, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
 
 - Types: `int` (64-bit), `bool`, `float` (64-bit), `string`, arrays `[T]`, maps `{string: V}`, and user-defined `struct`s — no implicit conversions
 - Literals: `42`, `true` / `false`, `3.14`, `"text"`, `[1, 2, 3]`, `{"a": 1}`, `[]` / `{}` (empty, with a type annotation), `Point { x: 1, y: 2 }`, `null`
-- Strings: `+` concatenates (heap-allocated), `== != < <= > >=` compare (lexicographic, so they sort), `s[i]` reads a byte (bounds-checked)
+- Strings: `+` concatenates (heap-allocated), `== != < <= > >=` compare (lexicographic, so they sort), `s[i]` reads a byte (bounds-checked), plus `substr` / `split` / `join`
 - Arrays: `a[i]` read/write (bounds-checked), `len(a)`, **growable** with `push(a, x)`; elements can be scalars or structs (`[Point]`)
 - Maps: `m[k]` read (aborts on a missing key) / `m[k] = v` write, `has(m, k)`, `len(m)`, `delete(m, k)`, `keys(m)` → `[string]`
 - Structs: `struct Point { x: int, y: int }`, field access `p.x` (read/write), nestable
 - `null` for reference types (string/array/map/struct) → recursive data structures (linked lists, trees); null deref is caught at runtime
-- Built-ins: `int(x)` / `float(x)` conversions, `len(x)`, `push(a, x)` (append), `has`/`delete`/`keys` (maps), `str(x)` (stringify), `chr(b)` (byte → 1-char string), `read_line()` (stdin → string / `null` at EOF)
+- Built-ins: `int(x)` / `float(x)` conversions, `len(x)`, `push(a, x)` (append), `has`/`delete`/`keys` (maps), `substr`/`split`/`join` (strings), `str(x)` (stringify), `chr(b)` (byte → 1-char string), `read_line()` (stdin → string / `null` at EOF)
 - Math: `sqrt`, `pow`, `floor`, `ceil` (float), and `abs` / `min` / `max` (int or float)
 - Runtime safety: array/string bounds checks, null-dereference checks, integer division-by-zero checks
 - Variables are lexically block-scoped, with shadowing; optional type annotations (`let x: T = ...`)
