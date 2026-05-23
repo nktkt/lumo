@@ -175,13 +175,39 @@ impl FnChecker<'_> {
     }
     fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), Diagnostic> {
         match &stmt.kind {
-            StmtKind::Let { name, value } => {
+            StmtKind::Let { name, ty, value } => {
                 let t = self.check_expr(value)?;
+                let declared = match ty {
+                    Some(a) => {
+                        validate_type(*a, self.structs, stmt.span)?;
+                        // 初期値が注釈型に代入可能か（null は参照型に可）
+                        if t != *a && !(t == Type::Null && a.is_reference()) {
+                            return Err(Diagnostic::error(format!(
+                                "{} 型の変数に {} 型を入れようとしました",
+                                a.name(),
+                                t.name()
+                            ))
+                            .with_code("E0200")
+                            .at(value.span));
+                        }
+                        *a
+                    }
+                    None => {
+                        if t == Type::Null {
+                            return Err(Diagnostic::error(
+                                "null だけからは変数の型を推論できません（型注釈 `let x: T = null` を使ってください）",
+                            )
+                            .with_code("E0208")
+                            .at(value.span));
+                        }
+                        t
+                    }
+                };
                 // 最内スコープに束縛（外側の同名変数はシャドーイング）
-                self.declare(name, t);
+                self.declare(name, declared);
             }
             StmtKind::Assign { target, value } => {
-                // 左辺は変数か添字のみ（lvalue）。その型と右辺の型を一致させる。
+                // 左辺は変数か添字かフィールド（lvalue）。その型と右辺の型を一致させる。
                 let target_ty = match &target.kind {
                     ExprKind::Var(_) | ExprKind::Index { .. } | ExprKind::Field { .. } => {
                         self.check_expr(target)?
@@ -195,7 +221,8 @@ impl FnChecker<'_> {
                     }
                 };
                 let t = self.check_expr(value)?;
-                if t != target_ty {
+                // null は参照型の代入先に入れられる
+                if t != target_ty && !(t == Type::Null && target_ty.is_reference()) {
                     return Err(Diagnostic::error(format!(
                         "代入先は {} 型ですが {} 型を代入しようとしました",
                         target_ty.name(),
@@ -207,7 +234,7 @@ impl FnChecker<'_> {
             }
             StmtKind::Print(e) => {
                 let t = self.check_expr(e)?;
-                if matches!(t, Type::Array(_) | Type::Struct(_)) {
+                if !matches!(t, Type::Int | Type::Bool | Type::Float | Type::Str) {
                     return Err(Diagnostic::error(format!(
                         "print できるのは int/bool/float/string です（{} は不可）",
                         t.name()
@@ -218,7 +245,7 @@ impl FnChecker<'_> {
             }
             StmtKind::Return(e) => {
                 let t = self.check_expr(e)?;
-                if t != self.ret {
+                if t != self.ret && !(t == Type::Null && self.ret.is_reference()) {
                     return Err(Diagnostic::error(format!(
                         "関数は {} を返しますが {} を返そうとしています",
                         self.ret.name(),
@@ -303,6 +330,7 @@ impl FnChecker<'_> {
             ExprKind::Float(_) => Ok(Type::Float),
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::Str(_) => Ok(Type::Str),
+            ExprKind::Null => Ok(Type::Null),
             ExprKind::Var(name) => self.lookup(name).ok_or_else(|| {
                 Diagnostic::error(format!("未定義の変数: {}", name))
                     .with_code("E0101")
@@ -356,8 +384,19 @@ impl FnChecker<'_> {
                         Ok(Type::Int)
                     }
                     BinOp::Eq | BinOp::Ne => {
-                        // 等価比較は int 同士 / float 同士 / string 同士 -> bool
-                        if lt == Type::Str {
+                        // 等価比較: int/float/string 同士、または参照型 vs null -> bool
+                        if lt == Type::Null || rt == Type::Null {
+                            // 片方が null。もう片方は参照型か null でなければならない。
+                            let other = if lt == Type::Null { rt } else { lt };
+                            if other != Type::Null && !other.is_reference() {
+                                return Err(Diagnostic::error(format!(
+                                    "null と比較できるのは参照型(string/array/struct)だけですが {} が使われています",
+                                    other.name()
+                                ))
+                                .with_code("E0200")
+                                .at(e.span));
+                            }
+                        } else if lt == Type::Str {
                             expect(Type::Str, rt, rhs.span)?;
                         } else {
                             if !lt.is_numeric() {
@@ -569,7 +608,8 @@ impl FnChecker<'_> {
 }
 
 fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
-    if want == got {
+    // null は任意の参照型（string/array/struct）として受け入れる
+    if want == got || (got == Type::Null && want.is_reference()) {
         Ok(())
     } else {
         Err(Diagnostic::error(format!(

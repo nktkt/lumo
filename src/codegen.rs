@@ -92,7 +92,7 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().into(),
             Type::Bool => self.ctx.bool_type().into(),
             Type::Float => self.ctx.f64_type().into(),
-            Type::Str | Type::Array(_) | Type::Struct(_) => {
+            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Null => {
                 self.ctx.ptr_type(AddressSpace::default()).into()
             }
         }
@@ -104,7 +104,7 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().const_int(0, false).into(),
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::Float => self.ctx.f64_type().const_float(0.0).into(),
-            Type::Str | Type::Array(_) | Type::Struct(_) => self
+            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Null => self
                 .ctx
                 .ptr_type(AddressSpace::default())
                 .const_null()
@@ -197,8 +197,9 @@ impl<'ctx> CodeGen<'ctx> {
             .unwrap_basic();
         self.builder.build_return(Some(&mem)).unwrap();
 
-        // 配列の境界チェック失敗ハンドラ: stderr にメッセージを書いて異常終了する。
-        // i64 write(i32 fd, char* buf, i64 count) と void exit(i32) を使う。
+        // ランタイム異常終了ハンドラ: stderr にメッセージを書いて exit(101) する。
+        // void lumo_panic(char* msg, i64 len)。境界チェックや null チェックが使う。
+        // i64 write(i32 fd, char* buf, i64 count) と void exit(i32) を libc から使う。
         self.module.add_function(
             "write",
             i64t.fn_type(&[i32t.into(), ptr.into(), i64t.into()], false),
@@ -208,28 +209,50 @@ impl<'ctx> CodeGen<'ctx> {
         self.module
             .add_function("exit", void.fn_type(&[i32t.into()], false), ext);
 
-        let fail = self
-            .module
-            .add_function("lumo_bounds_fail", void.fn_type(&[], false), None);
-        let fb = self.ctx.append_basic_block(fail, "entry");
+        let panic = self.module.add_function(
+            "lumo_panic",
+            void.fn_type(&[ptr.into(), i64t.into()], false),
+            None,
+        );
+        let fb = self.ctx.append_basic_block(panic, "entry");
         self.builder.position_at_end(fb);
-        let msg = "lumo: array index out of bounds\n";
-        let msg_ptr = self
-            .builder
-            .build_global_string_ptr(msg, "oob_msg")
-            .unwrap()
-            .as_pointer_value();
+        let msg_ptr = panic.get_nth_param(0).unwrap();
+        let len = panic.get_nth_param(1).unwrap();
         let two = i32t.const_int(2, false); // fd 2 = stderr
-        let n = i64t.const_int(msg.len() as u64, false);
         let write_fn = self.module.get_function("write").unwrap();
         self.builder
-            .build_call(write_fn, &[two.into(), msg_ptr.into(), n.into()], "")
+            .build_call(write_fn, &[two.into(), msg_ptr.into(), len.into()], "")
             .unwrap();
         let exit_fn = self.module.get_function("exit").unwrap();
         self.builder
             .build_call(exit_fn, &[i32t.const_int(101, false).into()], "")
             .unwrap();
         self.builder.build_unreachable().unwrap();
+    }
+
+    /// `lumo_panic(msg, len)` を呼んで unreachable で締める（現在のブロックを終端する）。
+    fn panic(&mut self, msg: &'static str, name: &'static str) {
+        let m = self.global_str(msg, name);
+        let len = self.ctx.i64_type().const_int(msg.len() as u64, false);
+        let panic_fn = self.module.get_function("lumo_panic").unwrap();
+        self.builder
+            .build_call(panic_fn, &[m.into(), len.into()], "")
+            .unwrap();
+        self.builder.build_unreachable().unwrap();
+    }
+
+    /// ポインタが null なら "null reference" で異常終了するチェックを差し込む。
+    fn null_check(&mut self, p: PointerValue<'ctx>) {
+        let isnull = self.builder.build_is_null(p, "isnull").unwrap();
+        let function = self.cur_function();
+        let fail_bb = self.ctx.append_basic_block(function, "null.fail");
+        let ok_bb = self.ctx.append_basic_block(function, "null.ok");
+        self.builder
+            .build_conditional_branch(isnull, fail_bb, ok_bb)
+            .unwrap();
+        self.builder.position_at_end(fail_bb);
+        self.panic("lumo: null reference\n", "null_msg");
+        self.builder.position_at_end(ok_bb);
     }
 
     fn gen_function(&mut self, f: &Function) {
@@ -290,11 +313,16 @@ impl<'ctx> CodeGen<'ctx> {
 
     fn gen_stmt(&mut self, stmt: &Stmt, function: FunctionValue<'ctx>) {
         match &stmt.kind {
-            StmtKind::Let { name, value } => {
-                let (v, ty) = self.gen_expr(value);
-                // 新しい alloca を最内スコープに束縛する（シャドーイング対応）
-                let alloca = self.builder.build_alloca(self.basic_ty(ty), name).unwrap();
-                self.declare_var(name, alloca, ty);
+            StmtKind::Let { name, ty, value } => {
+                let (v, vty) = self.gen_expr(value);
+                // 型注釈があればそれを、無ければ初期値の型を変数の型にする
+                // (null を参照型の変数へ入れる場合でも、どちらもポインタなので store 可)
+                let decl = ty.unwrap_or(vty);
+                let alloca = self
+                    .builder
+                    .build_alloca(self.basic_ty(decl), name)
+                    .unwrap();
+                self.declare_var(name, alloca, decl);
                 self.builder.build_store(alloca, v).unwrap();
             }
             StmtKind::Assign { target, value } => {
@@ -352,8 +380,8 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_call(printf, &[fmt.into(), s.into()], "printf_call")
                             .unwrap();
                     }
-                    Type::Array(_) | Type::Struct(_) => {
-                        unreachable!("typeck forbids printing arrays/structs")
+                    Type::Array(_) | Type::Struct(_) | Type::Null => {
+                        unreachable!("typeck forbids printing arrays/structs/null")
                     }
                 }
             }
@@ -502,6 +530,13 @@ impl<'ctx> CodeGen<'ctx> {
                     .as_pointer_value();
                 (g.into(), Type::Str)
             }
+            ExprKind::Null => (
+                self.ctx
+                    .ptr_type(AddressSpace::default())
+                    .const_null()
+                    .into(),
+                Type::Null,
+            ),
             ExprKind::Var(name) => {
                 let (ptr, ty) = self.lookup_var(name);
                 let v = self
@@ -540,8 +575,33 @@ impl<'ctx> CodeGen<'ctx> {
                 BinOp::And | BinOp::Or => self.gen_logical(*op, lhs, rhs),
                 _ => {
                     let (l, lty) = self.gen_expr(lhs);
-                    let (r, _) = self.gen_expr(rhs);
-                    self.gen_arith_or_cmp(*op, l, r, lty)
+                    let (r, rty) = self.gen_expr(rhs);
+                    // 参照 vs null の == / != はポインタ比較（ptrtoint して整数比較）
+                    if matches!(op, BinOp::Eq | BinOp::Ne)
+                        && (lty == Type::Null || rty == Type::Null)
+                    {
+                        let i64t = self.ctx.i64_type();
+                        let li = self
+                            .builder
+                            .build_ptr_to_int(l.into_pointer_value(), i64t, "l2i")
+                            .unwrap();
+                        let ri = self
+                            .builder
+                            .build_ptr_to_int(r.into_pointer_value(), i64t, "r2i")
+                            .unwrap();
+                        let pred = if matches!(op, BinOp::Eq) {
+                            IntPredicate::EQ
+                        } else {
+                            IntPredicate::NE
+                        };
+                        let res = self
+                            .builder
+                            .build_int_compare(pred, li, ri, "refcmp")
+                            .unwrap();
+                        (res.into(), Type::Bool)
+                    } else {
+                        self.gen_arith_or_cmp(*op, l, r, lty)
+                    }
                 }
             },
             ExprKind::Call { name, args } if name == "int" => {
@@ -697,7 +757,14 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// 構造体ポインタ `obj` の `field` のアドレスを GEP で計算する。
-    fn field_addr(&self, obj: PointerValue<'ctx>, obj_ty: Type, field: &str) -> PointerValue<'ctx> {
+    fn field_addr(
+        &mut self,
+        obj: PointerValue<'ctx>,
+        obj_ty: Type,
+        field: &str,
+    ) -> PointerValue<'ctx> {
+        // 構造体が null でないことを先に確認する
+        self.null_check(obj);
         let sname = match obj_ty {
             Type::Struct(n) => n,
             _ => unreachable!("typeck guarantees a struct here"),
@@ -870,6 +937,8 @@ impl<'ctx> CodeGen<'ctx> {
     /// レイアウトは [長さ i64][8byte スロット×N] なので、要素は 8 + 8*i バイト目。
     fn elem_addr(&mut self, base: PointerValue<'ctx>, index: &Expr) -> PointerValue<'ctx> {
         let i64t = self.ctx.i64_type();
+        // 配列が null でないことを先に確認する
+        self.null_check(base);
         let (idx, _) = self.gen_expr(index);
         let idx = idx.into_int_value();
 
@@ -891,9 +960,7 @@ impl<'ctx> CodeGen<'ctx> {
             .unwrap();
 
         self.builder.position_at_end(fail_bb);
-        let fail = self.module.get_function("lumo_bounds_fail").unwrap();
-        self.builder.build_call(fail, &[], "").unwrap();
-        self.builder.build_unreachable().unwrap();
+        self.panic("lumo: array index out of bounds\n", "oob_msg");
 
         self.builder.position_at_end(ok_bb);
         let eight = i64t.const_int(8, false);

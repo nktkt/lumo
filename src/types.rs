@@ -42,6 +42,8 @@ pub enum Type {
     /// ユーザー定義の構造体（名前で参照。ヒープ確保したポインタ）。
     /// 名前は `intern` でリークして `&'static str` にし、`Copy` を保つ。
     Struct(&'static str),
+    /// `null` リテラルの型。参照型（string/array/struct）と互換。
+    Null,
 }
 
 impl Type {
@@ -53,12 +55,18 @@ impl Type {
             Type::Str => "string".to_string(),
             Type::Array(e) => format!("[{}]", e.name()),
             Type::Struct(n) => n.to_string(),
+            Type::Null => "null".to_string(),
         }
     }
 
     /// 算術・大小比較が使える数値型か
     pub fn is_numeric(self) -> bool {
         matches!(self, Type::Int | Type::Float)
+    }
+
+    /// ヒープ上のポインタで表される参照型か（null を代入できる先）。
+    pub fn is_reference(self) -> bool {
+        matches!(self, Type::Str | Type::Array(_) | Type::Struct(_))
     }
 
     /// 配列の要素型として使えるスカラ型なら、その `Elem` を返す。
@@ -68,7 +76,7 @@ impl Type {
             Type::Bool => Some(Elem::Bool),
             Type::Float => Some(Elem::Float),
             Type::Str => Some(Elem::Str),
-            Type::Array(_) | Type::Struct(_) => None,
+            Type::Array(_) | Type::Struct(_) | Type::Null => None,
         }
     }
 }

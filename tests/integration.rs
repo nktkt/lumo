@@ -155,6 +155,11 @@ fn structs() {
     run_ok("structs");
 }
 
+#[test]
+fn linked_list() {
+    run_ok("linked_list");
+}
+
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized
 /// IR has `alloca`s, the optimized IR should not.
 #[test]
@@ -313,4 +318,15 @@ fn err_unknown_struct() {
 #[test]
 fn err_field_nonstruct() {
     run_err("err_field_nonstruct", "E0305");
+}
+
+/// Dereferencing null is a runtime failure.
+#[test]
+fn null_deref_runtime_check() {
+    run_err("null_deref", "null reference");
+}
+
+#[test]
+fn err_let_null() {
+    run_err("err_let_null", "E0208");
 }

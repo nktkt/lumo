@@ -1,0 +1,10 @@
+struct N {
+    v: int,
+    next: N,
+}
+
+fn main() {
+    let n = N { v: 1, next: null };
+    print n.next.v;
+    return 0;
+}

@@ -212,10 +212,16 @@ impl Parser {
             Tok::Let => {
                 self.next();
                 let (name, _) = self.parse_ident()?;
+                let ty = if self.peek() == &Tok::Colon {
+                    self.next();
+                    Some(self.parse_type()?.0)
+                } else {
+                    None
+                };
                 self.eat(&Tok::Assign)?;
                 let value = self.parse_expr()?;
                 self.eat(&Tok::Semicolon)?;
-                StmtKind::Let { name, value }
+                StmtKind::Let { name, ty, value }
             }
             Tok::Return => {
                 self.next();
@@ -323,9 +329,15 @@ impl Parser {
             Tok::Let => {
                 self.next();
                 let (name, _) = self.parse_ident()?;
+                let ty = if self.peek() == &Tok::Colon {
+                    self.next();
+                    Some(self.parse_type()?.0)
+                } else {
+                    None
+                };
                 self.eat(&Tok::Assign)?;
                 let value = self.parse_expr()?;
-                StmtKind::Let { name, value }
+                StmtKind::Let { name, ty, value }
             }
             _ => {
                 let e = self.parse_expr()?;
@@ -495,6 +507,10 @@ impl Parser {
             }),
             Tok::False => Ok(Expr {
                 kind: ExprKind::Bool(false),
+                span,
+            }),
+            Tok::Null => Ok(Expr {
+                kind: ExprKind::Null,
                 span,
             }),
             Tok::LParen => {

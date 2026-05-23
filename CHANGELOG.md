@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.14.0]
+
+### Added
+
+- `null`: a value compatible with any reference type (string, array, struct), enabling recursive data structures (linked lists, trees) via self-referential structs. Compare with `==` / `!=`.
+- Optional type annotations on `let` (`let x: T = ...`), required when initializing with `null`.
+- Reading a field/index through `null` is caught at runtime (`lumo: null reference`, exit 101).
+
+### Notes
+
+- New diagnostics: `E0208` (cannot infer the type of bare `null`). The runtime `lumo_bounds_fail` was generalized to `lumo_panic(msg, len)`, shared by the bounds and null checks.
+
 ## [0.13.0]
 
 ### Added

@@ -25,6 +25,7 @@ pub enum Tok {
     Print,
     True,
     False,
+    Null,
     // 区切り
     LParen,    // (
     RParen,    // )
@@ -205,6 +206,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                 "print" => Tok::Print,
                 "true" => Tok::True,
                 "false" => Tok::False,
+                "null" => Tok::Null,
                 _ => Tok::Ident(s),
             };
             toks.push(Token { kind, span });

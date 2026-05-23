@@ -1,0 +1,35 @@
+# null + recursive structs: a singly linked list
+struct Node {
+    val: int,
+    next: Node,
+}
+
+fn cons(v: int, rest: Node) -> Node {
+    return Node { val: v, next: rest };
+}
+
+fn sum(list: Node) -> int {
+    let total = 0;
+    let n = list;
+    while (n != null) {
+        total = total + n.val;
+        n = n.next;
+    }
+    return total;
+}
+
+fn length(list: Node) -> int {
+    if (list == null) {
+        return 0;
+    }
+    return 1 + length(list.next);
+}
+
+fn main() {
+    let list = cons(1, cons(2, cons(3, null)));
+    print sum(list);        # 6
+    print length(list);     # 3
+    print list.next.val;    # 2
+    print length(null);     # 0  (null passed as a Node)
+    return 0;
+}
