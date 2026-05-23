@@ -1,0 +1,40 @@
+# Structs (Phase 13 / v0.13)
+#
+# Declare with `struct Name { field: Type, ... }`, construct with
+# `Name { field: value, ... }`, and access fields with `obj.field` (read/write).
+# Structs are heap-allocated; struct-typed fields are references, so structs can
+# nest. Like other heap values they're reclaimed at program exit (RFC 0001).
+
+struct Point {
+    x: float,
+    y: float,
+}
+
+struct Circle {
+    center: Point,
+    radius: float,
+}
+
+fn area(c: Circle) -> float {
+    return 3.14159 * c.radius * c.radius;
+}
+
+fn translate(p: Point, dx: float, dy: float) -> Point {
+    return Point { x: p.x + dx, y: p.y + dy };
+}
+
+fn main() {
+    let c = Circle {
+        center: Point { x: 0.0, y: 0.0 },
+        radius: 2.0,
+    };
+    print area(c);              # ~12.5664
+
+    let moved = translate(c.center, 1.5, -3.0);
+    print moved.x;             # 1.5
+    print moved.y;             # -3
+
+    c.radius = 10.0;           # mutate a field
+    print area(c);             # ~314.159
+    return 0;
+}

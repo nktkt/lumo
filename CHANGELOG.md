@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.13.0]
+
+### Added
+
+- User-defined structs: `struct Name { field: Type, ... }`, construction `Name { field: value, ... }`, and field access `obj.field` (read and write). Structs are heap-allocated, can be passed/returned, and can nest (struct-typed fields).
+- Assignment targets now include struct fields.
+
+### Notes
+
+- New diagnostics: `E0303` (unknown struct), `E0304` (duplicate struct), `E0305` (field access on a non-struct), `E0306` (no such field), `E0307` (duplicate/missing field). Arrays of structs are not supported yet.
+
 ## [0.12.0]
 
 ### Added

@@ -36,7 +36,7 @@ code `0` (the value returned by `main`).
 
 ## Types
 
-Lumo has four primitive types and one compound type:
+Lumo has four primitive types and two compound types:
 
 - `int` — 64-bit signed integer
 - `bool` — either `true` or `false`
@@ -44,6 +44,7 @@ Lumo has four primitive types and one compound type:
 - `string` — an immutable text value
 - `[T]` — an array of `T`, where `T` is `int`, `bool`, `float`, or `string`
   (see [Arrays](#arrays))
+- a user-defined `struct` (see [Structs](#structs))
 
 There are **no implicit conversions** between types. An `int` is never
 automatically turned into a `float`, a `bool` is never treated as a number, and
@@ -288,6 +289,36 @@ like concatenated strings, are currently reclaimed only at program exit — see
 out-of-range index (including a negative one) prints `lumo: array index out of
 bounds` to stderr and exits with status 101.
 
+## Structs
+
+Declare a struct at the top level (alongside functions):
+
+```lumo
+struct Point {
+    x: int,
+    y: int,
+}
+```
+
+- **Construct:** `Point { x: 3, y: 4 }` — every field must be given exactly once
+  (field order doesn't matter), with a matching type.
+- **Access:** `p.x` reads a field, `p.x = v;` writes one.
+- A struct may be a parameter type, return type, or another struct's field type
+  (struct fields are references, so structs can nest).
+
+```lumo
+fn dist_sq(p: Point) -> int {
+    return p.x * p.x + p.y * p.y;
+}
+
+struct Rect { lo: Point, hi: Point }   # structs can contain structs
+```
+
+Structs are heap-allocated and assigned by reference (two variables bound to the
+same struct value alias the same data). Like other heap values they are
+reclaimed only at program exit; see [RFC 0001](rfcs/0001-memory-model.md).
+Arrays of structs are not supported yet.
+
 Execution starts at `fn main()`. The value `main` returns becomes the process
 exit code.
 
@@ -361,12 +392,13 @@ The following EBNF-ish sketch outlines the syntax. `{ X }` means zero or more
 repetitions and `[ X ]` means optional.
 
 ```ebnf
-program     = { function } ;
+program     = { struct_def | function } ;
 
+struct_def  = "struct" ident "{" [ param { "," param } [ "," ] ] "}" ;
 function    = "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params      = param { "," param } ;
 param       = ident ":" type ;
-type        = "int" | "bool" | "float" | "string" | "[" type "]" ;
+type        = "int" | "bool" | "float" | "string" | "[" type "]" | ident ;
 
 block       = "{" { statement } "}" ;
 
@@ -403,13 +435,16 @@ cmp_expr    = add_expr { ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) add_expr } ;
 add_expr    = mul_expr { ( "+" | "-" ) mul_expr } ;
 mul_expr    = unary    { ( "*" | "/" | "%" ) unary } ;
 unary       = ( "-" | "!" ) unary | postfix ;
-postfix     = primary { "[" expr "]" } ;   (* array indexing *)
+postfix     = primary { "[" expr "]" | "." ident } ;   (* indexing / field access *)
 array_lit   = "[" [ expr { "," expr } ] "]" ;
+struct_lit  = ident "{" [ field_init { "," field_init } [ "," ] ] "}" ;
+field_init  = ident ":" expr ;
 primary     = int_lit
             | float_lit
             | bool_lit
             | str_lit
             | array_lit
+            | struct_lit
             | ident
             | call
             | "(" expr ")" ;

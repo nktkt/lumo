@@ -19,7 +19,7 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, StructType};
 use inkwell::values::{
     BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue, PointerValue,
 };
@@ -27,7 +27,7 @@ use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 
 use crate::ast::*;
 use crate::diagnostics::Diagnostic;
-use crate::types::Type;
+use crate::types::{intern, Type};
 
 pub struct CodeGen<'ctx> {
     ctx: &'ctx Context,
@@ -42,6 +42,8 @@ pub struct CodeGen<'ctx> {
     strings: HashMap<&'static str, PointerValue<'ctx>>,
     /// 入れ子ループの (continue先, break先) ブロックのスタック
     loop_stack: Vec<(BasicBlock<'ctx>, BasicBlock<'ctx>)>,
+    /// 構造体名 -> (LLVM構造体型, フィールド定義順の (名前, 型))
+    structs: HashMap<String, (StructType<'ctx>, Vec<(String, Type)>)>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -54,6 +56,7 @@ impl<'ctx> CodeGen<'ctx> {
             fn_rets: HashMap::new(),
             strings: HashMap::new(),
             loop_stack: Vec::new(),
+            structs: HashMap::new(),
         }
     }
 
@@ -89,7 +92,9 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().into(),
             Type::Bool => self.ctx.bool_type().into(),
             Type::Float => self.ctx.f64_type().into(),
-            Type::Str | Type::Array(_) => self.ctx.ptr_type(AddressSpace::default()).into(),
+            Type::Str | Type::Array(_) | Type::Struct(_) => {
+                self.ctx.ptr_type(AddressSpace::default()).into()
+            }
         }
     }
 
@@ -99,7 +104,7 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().const_int(0, false).into(),
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::Float => self.ctx.f64_type().const_float(0.0).into(),
-            Type::Str | Type::Array(_) => self
+            Type::Str | Type::Array(_) | Type::Struct(_) => self
                 .ctx
                 .ptr_type(AddressSpace::default())
                 .const_null()
@@ -111,9 +116,19 @@ impl<'ctx> CodeGen<'ctx> {
         // 1) ランタイム（printf と、文字列ヒープ用の libc 関数・lumo_alloc）を用意する
         self.declare_runtime();
 
-        // 2) すべての関数シグネチャを先に宣言する（前方参照・相互再帰のため）。
+        // 2) 構造体の LLVM 型を登録する（フィールドは basic_ty。構造体フィールドは
+        //    ポインタなので相互参照・再帰構造も問題ない）。
+        for s in &program.structs {
+            let field_types: Vec<BasicTypeEnum> =
+                s.fields.iter().map(|f| self.basic_ty(f.ty)).collect();
+            let st = self.ctx.struct_type(&field_types, false);
+            let fields = s.fields.iter().map(|f| (f.name.clone(), f.ty)).collect();
+            self.structs.insert(s.name.clone(), (st, fields));
+        }
+
+        // 3) すべての関数シグネチャを先に宣言する（前方参照・相互再帰のため）。
         //    typeck が重複や main の存在を確認済みなのでここでは検査しない。
-        for f in program {
+        for f in &program.funcs {
             let param_types: Vec<BasicMetadataTypeEnum> = f
                 .params
                 .iter()
@@ -124,12 +139,12 @@ impl<'ctx> CodeGen<'ctx> {
             self.fn_rets.insert(f.name.clone(), f.ret);
         }
 
-        // 3) 各関数の本体を生成する
-        for f in program {
+        // 4) 各関数の本体を生成する
+        for f in &program.funcs {
             self.gen_function(f);
         }
 
-        // 4) 生成したIRの整合性を検証する（コンパイラ側のバグ検出用）
+        // 5) 生成したIRの整合性を検証する（コンパイラ側のバグ検出用）
         if self.module.verify().is_err() {
             return Err(Diagnostic::error(format!(
                 "内部エラー: 生成したLLVM IRが不正です\n{}",
@@ -294,6 +309,11 @@ impl<'ctx> CodeGen<'ctx> {
                         let addr = self.elem_addr(arr.into_pointer_value(), index);
                         self.builder.build_store(addr, v).unwrap();
                     }
+                    ExprKind::Field { obj, field } => {
+                        let (ov, oty) = self.gen_expr(obj);
+                        let addr = self.field_addr(ov.into_pointer_value(), oty, field);
+                        self.builder.build_store(addr, v).unwrap();
+                    }
                     _ => unreachable!("typeck restricts assignment targets"),
                 }
             }
@@ -332,7 +352,9 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_call(printf, &[fmt.into(), s.into()], "printf_call")
                             .unwrap();
                     }
-                    Type::Array(_) => unreachable!("typeck forbids printing arrays"),
+                    Type::Array(_) | Type::Struct(_) => {
+                        unreachable!("typeck forbids printing arrays/structs")
+                    }
                 }
             }
             StmtKind::Return(e) => {
@@ -638,7 +660,63 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap();
                 (v, elem.to_type())
             }
+            ExprKind::StructLit { name, fields } => {
+                let (st, def) = self.structs[name].clone();
+                let size = st.size_of().unwrap();
+                let alloc = self.module.get_function("lumo_alloc").unwrap();
+                let obj = self
+                    .builder
+                    .build_call(alloc, &[size.into()], "obj")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+                // 各フィールドを定義順のインデックスへ格納する
+                for (idx, (fname, _)) in def.iter().enumerate() {
+                    let init = fields.iter().find(|fi| &fi.name == fname).unwrap();
+                    let (val, _) = self.gen_expr(&init.value);
+                    let addr = self
+                        .builder
+                        .build_struct_gep(st, obj, idx as u32, "field")
+                        .unwrap();
+                    self.builder.build_store(addr, val).unwrap();
+                }
+                (obj.into(), Type::Struct(intern(name)))
+            }
+            ExprKind::Field { obj, field } => {
+                let (ov, oty) = self.gen_expr(obj);
+                let fty = self.field_type(oty, field);
+                let addr = self.field_addr(ov.into_pointer_value(), oty, field);
+                let v = self
+                    .builder
+                    .build_load(self.basic_ty(fty), addr, "fld")
+                    .unwrap();
+                (v, fty)
+            }
         }
+    }
+
+    /// 構造体ポインタ `obj` の `field` のアドレスを GEP で計算する。
+    fn field_addr(&self, obj: PointerValue<'ctx>, obj_ty: Type, field: &str) -> PointerValue<'ctx> {
+        let sname = match obj_ty {
+            Type::Struct(n) => n,
+            _ => unreachable!("typeck guarantees a struct here"),
+        };
+        let (st, def) = &self.structs[sname];
+        let idx = def.iter().position(|(n, _)| n == field).unwrap();
+        self.builder
+            .build_struct_gep(*st, obj, idx as u32, "field")
+            .unwrap()
+    }
+
+    /// 構造体型 `obj_ty` の `field` の型を返す。
+    fn field_type(&self, obj_ty: Type, field: &str) -> Type {
+        let sname = match obj_ty {
+            Type::Struct(n) => n,
+            _ => unreachable!("typeck guarantees a struct here"),
+        };
+        let (_, def) = &self.structs[sname];
+        def.iter().find(|(n, _)| n == field).unwrap().1
     }
 
     /// 算術・比較演算（論理を除く二項演算）。`ty` は両辺の型（typeck が一致を保証）。

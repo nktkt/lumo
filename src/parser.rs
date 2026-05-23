@@ -8,7 +8,7 @@ use crate::ast::*;
 use crate::diagnostics::Diagnostic;
 use crate::lexer::{Tok, Token};
 use crate::span::Span;
-use crate::types::Type;
+use crate::types::{intern, Type};
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
     let mut p = Parser {
@@ -74,11 +74,51 @@ impl Parser {
     }
 
     fn parse_program(&mut self) -> Result<Program, Diagnostic> {
+        let mut structs = Vec::new();
         let mut funcs = Vec::new();
         while self.peek() != &Tok::Eof {
-            funcs.push(self.parse_function()?);
+            if self.peek() == &Tok::Struct {
+                structs.push(self.parse_struct()?);
+            } else {
+                funcs.push(self.parse_function()?);
+            }
         }
-        Ok(funcs)
+        Ok(Program { structs, funcs })
+    }
+
+    fn parse_struct(&mut self) -> Result<StructDef, Diagnostic> {
+        let start = self.cur_span().start;
+        self.eat(&Tok::Struct)?;
+        let (name, _) = self.parse_ident()?;
+        self.eat(&Tok::LBrace)?;
+        let mut fields = Vec::new();
+        if self.peek() != &Tok::RBrace {
+            loop {
+                let (fname, name_span) = self.parse_ident()?;
+                self.eat(&Tok::Colon)?;
+                let (fty, ty_span) = self.parse_type()?;
+                fields.push(Param {
+                    name: fname,
+                    ty: fty,
+                    span: name_span.merge(ty_span),
+                });
+                if self.peek() == &Tok::Comma {
+                    self.next();
+                    // 末尾カンマを許す
+                    if self.peek() == &Tok::RBrace {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        self.eat(&Tok::RBrace)?;
+        Ok(StructDef {
+            name,
+            fields,
+            span: Span::new(start, self.last_end),
+        })
     }
 
     fn parse_function(&mut self) -> Result<Function, Diagnostic> {
@@ -131,9 +171,8 @@ impl Parser {
                 "bool" => Ok((Type::Bool, span)),
                 "float" => Ok((Type::Float, span)),
                 "string" => Ok((Type::Str, span)),
-                _ => Err(Diagnostic::error(format!("不明な型: {}", name))
-                    .with_code("E0300")
-                    .at(span)),
+                // それ以外は構造体名（実在するかは typeck が検証）
+                _ => Ok((Type::Struct(intern(&name)), span)),
             },
             // 配列型 [T]（T はスカラ。入れ子の配列は不可）
             Tok::LBracket => {
@@ -401,21 +440,36 @@ impl Parser {
         self.parse_postfix()
     }
 
-    /// 一次式に後置の添字 `[index]` を（連鎖して）付ける。
+    /// 一次式に後置の添字 `[index]` とフィールドアクセス `.field` を（連鎖して）付ける。
     fn parse_postfix(&mut self) -> Result<Expr, Diagnostic> {
         let mut e = self.parse_primary()?;
-        while self.peek() == &Tok::LBracket {
-            self.next();
-            let index = self.parse_expr()?;
-            self.eat(&Tok::RBracket)?;
-            let span = Span::new(e.span.start, self.last_end);
-            e = Expr {
-                kind: ExprKind::Index {
-                    array: Box::new(e),
-                    index: Box::new(index),
-                },
-                span,
-            };
+        loop {
+            if self.peek() == &Tok::LBracket {
+                self.next();
+                let index = self.parse_expr()?;
+                self.eat(&Tok::RBracket)?;
+                let span = Span::new(e.span.start, self.last_end);
+                e = Expr {
+                    kind: ExprKind::Index {
+                        array: Box::new(e),
+                        index: Box::new(index),
+                    },
+                    span,
+                };
+            } else if self.peek() == &Tok::Dot {
+                self.next();
+                let (field, _) = self.parse_ident()?;
+                let span = Span::new(e.span.start, self.last_end);
+                e = Expr {
+                    kind: ExprKind::Field {
+                        obj: Box::new(e),
+                        field,
+                    },
+                    span,
+                };
+            } else {
+                break;
+            }
         }
         Ok(e)
     }
@@ -485,6 +539,35 @@ impl Parser {
                     self.eat(&Tok::RParen)?;
                     Ok(Expr {
                         kind: ExprKind::Call { name, args },
+                        span: Span::new(span.start, self.last_end),
+                    })
+                } else if self.peek() == &Tok::LBrace {
+                    // 構造体リテラル Name { field: value, ... }
+                    self.next();
+                    let mut fields = Vec::new();
+                    if self.peek() != &Tok::RBrace {
+                        loop {
+                            let (fname, fname_span) = self.parse_ident()?;
+                            self.eat(&Tok::Colon)?;
+                            let value = self.parse_expr()?;
+                            fields.push(FieldInit {
+                                span: Span::new(fname_span.start, value.span.end),
+                                name: fname,
+                                value,
+                            });
+                            if self.peek() == &Tok::Comma {
+                                self.next();
+                                if self.peek() == &Tok::RBrace {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.eat(&Tok::RBrace)?;
+                    Ok(Expr {
+                        kind: ExprKind::StructLit { name, fields },
                         span: Span::new(span.start, self.last_end),
                     })
                 } else {
