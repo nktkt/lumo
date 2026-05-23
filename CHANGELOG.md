@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.12.0]
+
+### Added
+
+- Array bounds checking: an out-of-range index (or a negative one) prints `lumo: array index out of bounds` to stderr and exits with status 101, instead of being undefined behavior.
+
 ## [0.11.0]
 
 ### Added

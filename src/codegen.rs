@@ -181,6 +181,40 @@ impl<'ctx> CodeGen<'ctx> {
             .try_as_basic_value()
             .unwrap_basic();
         self.builder.build_return(Some(&mem)).unwrap();
+
+        // 配列の境界チェック失敗ハンドラ: stderr にメッセージを書いて異常終了する。
+        // i64 write(i32 fd, char* buf, i64 count) と void exit(i32) を使う。
+        self.module.add_function(
+            "write",
+            i64t.fn_type(&[i32t.into(), ptr.into(), i64t.into()], false),
+            ext,
+        );
+        let void = self.ctx.void_type();
+        self.module
+            .add_function("exit", void.fn_type(&[i32t.into()], false), ext);
+
+        let fail = self
+            .module
+            .add_function("lumo_bounds_fail", void.fn_type(&[], false), None);
+        let fb = self.ctx.append_basic_block(fail, "entry");
+        self.builder.position_at_end(fb);
+        let msg = "lumo: array index out of bounds\n";
+        let msg_ptr = self
+            .builder
+            .build_global_string_ptr(msg, "oob_msg")
+            .unwrap()
+            .as_pointer_value();
+        let two = i32t.const_int(2, false); // fd 2 = stderr
+        let n = i64t.const_int(msg.len() as u64, false);
+        let write_fn = self.module.get_function("write").unwrap();
+        self.builder
+            .build_call(write_fn, &[two.into(), msg_ptr.into(), n.into()], "")
+            .unwrap();
+        let exit_fn = self.module.get_function("exit").unwrap();
+        self.builder
+            .build_call(exit_fn, &[i32t.const_int(101, false).into()], "")
+            .unwrap();
+        self.builder.build_unreachable().unwrap();
     }
 
     fn gen_function(&mut self, f: &Function) {
@@ -757,9 +791,34 @@ impl<'ctx> CodeGen<'ctx> {
     /// 配列の i 番目スロットのアドレスを計算する。
     /// レイアウトは [長さ i64][8byte スロット×N] なので、要素は 8 + 8*i バイト目。
     fn elem_addr(&mut self, base: PointerValue<'ctx>, index: &Expr) -> PointerValue<'ctx> {
+        let i64t = self.ctx.i64_type();
         let (idx, _) = self.gen_expr(index);
         let idx = idx.into_int_value();
-        let eight = self.ctx.i64_type().const_int(8, false);
+
+        // 境界チェック: 符号なし比較 idx >= len なら範囲外（負の添字も巨大値として弾く）
+        let len = self
+            .builder
+            .build_load(i64t, base, "len")
+            .unwrap()
+            .into_int_value();
+        let oob = self
+            .builder
+            .build_int_compare(IntPredicate::UGE, idx, len, "oob")
+            .unwrap();
+        let function = self.cur_function();
+        let fail_bb = self.ctx.append_basic_block(function, "oob.fail");
+        let ok_bb = self.ctx.append_basic_block(function, "oob.ok");
+        self.builder
+            .build_conditional_branch(oob, fail_bb, ok_bb)
+            .unwrap();
+
+        self.builder.position_at_end(fail_bb);
+        let fail = self.module.get_function("lumo_bounds_fail").unwrap();
+        self.builder.build_call(fail, &[], "").unwrap();
+        self.builder.build_unreachable().unwrap();
+
+        self.builder.position_at_end(ok_bb);
+        let eight = i64t.const_int(8, false);
         let scaled = self.builder.build_int_mul(idx, eight, "off.mul").unwrap();
         let off = self.builder.build_int_add(scaled, eight, "off").unwrap();
         unsafe {
