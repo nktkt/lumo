@@ -301,6 +301,216 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_string_runtime();
         // 文字列→数値パース（int()/float() の string 版、is_int/is_float）のランタイム。
         self.declare_parse_runtime();
+        // ファイル I/O（read_file/write_file）のランタイム。
+        self.declare_io_runtime();
+    }
+
+    /// ファイル I/O のランタイム（read_file/write_file）。libc の fopen 系を使う。
+    /// read_file は開けなければ null（read_line と同じ nullable string 方式）、
+    /// write_file は成功で true。どちらも JIT でプロセスの libc シンボルで解決される。
+    fn declare_io_runtime(&mut self) {
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+        let i1t = self.ctx.bool_type();
+        let i8t = self.ctx.i8_type();
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let ext = Some(Linkage::External);
+
+        // libc: FILE* fopen(char*, char*); int fclose(FILE*);
+        //       int fseek(FILE*, long, int); long ftell(FILE*);
+        //       size_t fread(void*, size_t, size_t, FILE*); size_t fwrite(...);
+        self.module
+            .add_function("fopen", ptr.fn_type(&[ptr.into(), ptr.into()], false), ext);
+        self.module
+            .add_function("fclose", i32t.fn_type(&[ptr.into()], false), ext);
+        self.module.add_function(
+            "fseek",
+            i32t.fn_type(&[ptr.into(), i64t.into(), i32t.into()], false),
+            ext,
+        );
+        self.module
+            .add_function("ftell", i64t.fn_type(&[ptr.into()], false), ext);
+        self.module.add_function(
+            "fread",
+            i64t.fn_type(&[ptr.into(), i64t.into(), i64t.into(), ptr.into()], false),
+            ext,
+        );
+        self.module.add_function(
+            "fwrite",
+            i64t.fn_type(&[ptr.into(), i64t.into(), i64t.into(), ptr.into()], false),
+            ext,
+        );
+
+        // --- ptr lumo_read_file(ptr path): 全内容を string で返す。開けなければ null ---
+        let read_fn =
+            self.module
+                .add_function("lumo_read_file", ptr.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(read_fn, "entry");
+            let ok_bb = self.ctx.append_basic_block(read_fn, "ok");
+            let fail_bb = self.ctx.append_basic_block(read_fn, "fail");
+            let path = read_fn.get_nth_param(0).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let mode = self.global_str("rb", "io_mode_rb");
+            let fopen = self.module.get_function("fopen").unwrap();
+            let f = self
+                .builder
+                .build_call(fopen, &[path.into(), mode.into()], "f")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let is_null = self.builder.build_is_null(f, "isnull").unwrap();
+            self.builder
+                .build_conditional_branch(is_null, fail_bb, ok_bb)
+                .unwrap();
+            // fail: return null
+            self.builder.position_at_end(fail_bb);
+            self.builder.build_return(Some(&ptr.const_null())).unwrap();
+            // ok: サイズを測り、確保して読み込む
+            self.builder.position_at_end(ok_bb);
+            let fseek = self.module.get_function("fseek").unwrap();
+            let ftell = self.module.get_function("ftell").unwrap();
+            // fseek(f, 0, SEEK_END=2)
+            self.builder
+                .build_call(
+                    fseek,
+                    &[
+                        f.into(),
+                        i64t.const_zero().into(),
+                        i32t.const_int(2, false).into(),
+                    ],
+                    "",
+                )
+                .unwrap();
+            let raw_size = self
+                .builder
+                .build_call(ftell, &[f.into()], "size")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            // 非シーク等で負なら 0 にする
+            let neg = self
+                .builder
+                .build_int_compare(IntPredicate::SLT, raw_size, i64t.const_zero(), "neg")
+                .unwrap();
+            let size = self
+                .builder
+                .build_select(neg, i64t.const_zero(), raw_size, "size")
+                .unwrap()
+                .into_int_value();
+            // fseek(f, 0, SEEK_SET=0)
+            self.builder
+                .build_call(
+                    fseek,
+                    &[f.into(), i64t.const_zero().into(), i32t.const_zero().into()],
+                    "",
+                )
+                .unwrap();
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let cap = self
+                .builder
+                .build_int_add(size, i64t.const_int(1, false), "cap")
+                .unwrap();
+            let buf = self
+                .builder
+                .build_call(alloc, &[cap.into()], "buf")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let fread = self.module.get_function("fread").unwrap();
+            let nread = self
+                .builder
+                .build_call(
+                    fread,
+                    &[
+                        buf.into(),
+                        i64t.const_int(1, false).into(),
+                        size.into(),
+                        f.into(),
+                    ],
+                    "nread",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            // buf[nread] = 0
+            let end = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[nread], "end")
+                    .unwrap()
+            };
+            self.builder.build_store(end, i8t.const_zero()).unwrap();
+            let fclose = self.module.get_function("fclose").unwrap();
+            self.builder.build_call(fclose, &[f.into()], "").unwrap();
+            self.builder.build_return(Some(&buf)).unwrap();
+        }
+
+        // --- i1 lumo_write_file(ptr path, ptr content): 成功で true ---
+        let write_fn = self.module.add_function(
+            "lumo_write_file",
+            i1t.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(write_fn, "entry");
+            let ok_bb = self.ctx.append_basic_block(write_fn, "ok");
+            let fail_bb = self.ctx.append_basic_block(write_fn, "fail");
+            let path = write_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let content = write_fn.get_nth_param(1).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let mode = self.global_str("wb", "io_mode_wb");
+            let fopen = self.module.get_function("fopen").unwrap();
+            let f = self
+                .builder
+                .build_call(fopen, &[path.into(), mode.into()], "f")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let is_null = self.builder.build_is_null(f, "isnull").unwrap();
+            self.builder
+                .build_conditional_branch(is_null, fail_bb, ok_bb)
+                .unwrap();
+            self.builder.position_at_end(fail_bb);
+            self.builder.build_return(Some(&i1t.const_zero())).unwrap();
+            self.builder.position_at_end(ok_bb);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let n = self
+                .builder
+                .build_call(strlen, &[content.into()], "n")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let fwrite = self.module.get_function("fwrite").unwrap();
+            let nw = self
+                .builder
+                .build_call(
+                    fwrite,
+                    &[
+                        content.into(),
+                        i64t.const_int(1, false).into(),
+                        n.into(),
+                        f.into(),
+                    ],
+                    "nw",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let fclose = self.module.get_function("fclose").unwrap();
+            self.builder.build_call(fclose, &[f.into()], "").unwrap();
+            let ok = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, nw, n, "ok")
+                .unwrap();
+            self.builder.build_return(Some(&ok)).unwrap();
+        }
     }
 
     /// 文字列→数値パースのランタイム。libc の strtol/strtod を endptr 付きで呼び、
@@ -2855,6 +3065,31 @@ impl<'ctx> CodeGen<'ctx> {
                     .try_as_basic_value()
                     .unwrap_basic();
                 (r, Type::Str)
+            }
+            ExprKind::Call { name, args } if name == "read_file" => {
+                // read_file(path): ファイル全体を文字列で返す。開けなければ null。
+                let (pv, _) = self.gen_expr(&args[0]);
+                let f = self.module.get_function("lumo_read_file").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[pv.into()], "rdfile")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Str)
+            }
+            ExprKind::Call { name, args } if name == "write_file" => {
+                // write_file(path, content): 書き込み成功なら true。
+                let (pv, _) = self.gen_expr(&args[0]);
+                let (cv, _) = self.gen_expr(&args[1]);
+                let f = self.module.get_function("lumo_write_file").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[pv.into(), cv.into()], "wrfile")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Bool)
             }
             ExprKind::Call { name, args } if name == "push" => {
                 // push(arr, x): 末尾に x を追加し、配列(ヘッダ)を返す。容量が足りなければ

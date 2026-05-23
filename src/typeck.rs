@@ -672,6 +672,35 @@ impl FnChecker<'_> {
                     return Ok(Type::Str);
                 }
 
+                // ファイル I/O: read_file(path) -> string（開けなければ null）
+                if name == "read_file" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "read_file() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    return Ok(Type::Str);
+                }
+
+                // ファイル I/O: write_file(path, content) -> bool（成功で true）
+                if name == "write_file" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "write_file() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Bool);
+                }
+
                 // 文字列ツールキット: substr(s, start, count) は (string,int,int) -> string
                 if name == "substr" {
                     if args.len() != 3 {
@@ -1052,6 +1081,8 @@ fn is_reserved_name(name: &str) -> bool {
             | "join"
             | "is_int"
             | "is_float"
+            | "read_file"
+            | "write_file"
     )
 }
 

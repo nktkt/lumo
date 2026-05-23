@@ -504,8 +504,8 @@ if (is_int(s)) {
 
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`,
 `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`, `keys`, `delete`,
-`substr`, `split`, `join`, `is_int`, and `is_float` are reserved names — you
-cannot define a function with one of them.
+`substr`, `split`, `join`, `is_int`, `is_float`, `read_file`, and `write_file`
+are reserved names — you cannot define a function with one of them.
 
 ### `read_line`
 
@@ -522,6 +522,33 @@ while (line != null) {
 ```
 
 (Lines longer than 4095 bytes come back in chunks.)
+
+### `read_file` / `write_file`
+
+Whole-file I/O for persisting state between runs:
+
+- **`write_file(path, content)`** writes the `string` `content` to the file at
+  `path`, **replacing** any existing contents, and returns a `bool` — `true` on
+  success, `false` if the file could not be opened or the write was short.
+- **`read_file(path)`** returns the file's entire contents as a `string`, or
+  `null` if it cannot be opened. As with `read_line`, guard the result against
+  `null` before using it.
+
+```lumo
+if (write_file("/tmp/notes.txt", "hello\nworld\n")) {
+    let text = read_file("/tmp/notes.txt");
+    if (text != null) {
+        for (line in split(text, "\n")) {
+            print line;          # hello / world / (trailing empty)
+        }
+    }
+}
+```
+
+Reading splits naturally with [`split`](#substr--split--join), and writing pairs
+with [`join`](#substr--split--join) to round-trip line-oriented data — see
+[`examples/save_load.lum`](../examples/save_load.lum). Files are read and written
+as raw bytes; there is no text encoding or buffering beyond the C library's.
 
 ### `chr`
 

@@ -278,6 +278,11 @@ fn parse_bad_int_aborts() {
     run_err("parse_bad", "non-integer string");
 }
 
+#[test]
+fn file_io_roundtrip() {
+    run_ok("file_io");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {

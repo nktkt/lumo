@@ -1,0 +1,60 @@
+# Saving and loading data with the file I/O built-ins.
+#
+# write_file(path, text) writes a whole string to a file, replacing any
+# existing contents, and returns true on success. read_file(path) returns the
+# file's entire contents as a string, or null if it cannot be opened. Together
+# they let a program persist state between runs.
+#
+# Here we serialize a high-score table to disk as "name,score" lines, then read
+# it back, parse it, and report the leader — the kind of save/load round-trip a
+# small game or tool needs.
+#
+#   cargo run -- run examples/save_load.lum
+#   -> saved 3 scores / loaded: ada=180 / loaded: grace=240 / loaded: lin=95 / top: grace with 240
+
+fn main() {
+    let path = "/tmp/lumo_scores.txt";
+
+    # Build the file contents: one "name,score" record per line.
+    let names = ["ada", "grace", "lin"];
+    let scores = [180, 240, 95];
+    let text = "";
+    let i = 0;
+    while (i < len(names)) {
+        text = text + names[i] + "," + str(scores[i]) + "\n";
+        i = i + 1;
+    }
+
+    if (!write_file(path, text)) {
+        print "could not write file";
+        return 1;
+    }
+    print "saved " + str(len(names)) + " scores";
+
+    # Load it back. A missing file would come back as null.
+    let loaded = read_file(path);
+    if (loaded == null) {
+        print "could not read file";
+        return 1;
+    }
+
+    # Parse each non-empty line and track the highest score.
+    let best_name = "";
+    let best_score = -1;
+    let lines = split(loaded, "\n");
+    for (line in lines) {
+        if (len(line) > 0) {
+            let parts = split(line, ",");
+            let name = parts[0];
+            let score = int(parts[1]);
+            print "loaded: " + name + "=" + str(score);
+            if (score > best_score) {
+                best_score = score;
+                best_name = name;
+            }
+        }
+    }
+
+    print "top: " + best_name + " with " + str(best_score);
+    return 0;
+}
