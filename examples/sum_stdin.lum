@@ -1,0 +1,24 @@
+# Reading input (Phase 20 / v0.20) — read_line() reads stdin.
+#
+# read_line() returns the next line as a string (newline stripped), or null at
+# end of input. Run with input piped in, e.g.:
+#   printf '3\n4\n10\n' | cargo run -- run examples/sum_stdin.lum
+
+fn parse_int(s: string) -> int {
+    let n = 0;
+    for (let i = 0; i < len(s); i = i + 1) {
+        n = n * 10 + (s[i] - 48);
+    }
+    return n;
+}
+
+fn main() {
+    let total = 0;
+    let line = read_line();
+    while (line != null) {
+        total = total + parse_int(line);
+        line = read_line();
+    }
+    print "sum = " + str(total);
+    return 0;
+}

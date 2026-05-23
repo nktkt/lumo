@@ -409,8 +409,24 @@ print float(total) / float(count);  # 3.5  (float division)
 print int(3.9);                     # 3    (truncates)
 ```
 
-`int`, `float`, `bool`, `string`, `len`, `str`, and `chr` are reserved names —
-you cannot define a function with one of them.
+`int`, `float`, `bool`, `string`, `len`, `str`, `chr`, and `read_line` are
+reserved names — you cannot define a function with one of them.
+
+### `read_line`
+
+`read_line()` reads the next line from standard input and returns it as a
+`string` with the trailing newline removed, or `null` at end of input. The idiom
+is to loop until `null`:
+
+```lumo
+let line = read_line();
+while (line != null) {
+    print line;            # echo stdin
+    line = read_line();
+}
+```
+
+(Lines longer than 4095 bytes come back in chunks.)
 
 ### `chr`
 

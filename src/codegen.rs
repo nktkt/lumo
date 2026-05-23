@@ -29,6 +29,16 @@ use crate::ast::*;
 use crate::diagnostics::Diagnostic;
 use crate::types::{intern, Type};
 
+/// libc の `stdin` (FILE*) のシンボル名。macOS では `__stdinp`、それ以外は `stdin`。
+/// ホスト向けにしかコンパイルしないので、コンパイル時の cfg で正しく選べる。
+fn stdin_symbol() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "__stdinp"
+    } else {
+        "stdin"
+    }
+}
+
 pub struct CodeGen<'ctx> {
     ctx: &'ctx Context,
     module: Module<'ctx>,
@@ -185,6 +195,20 @@ impl<'ctx> CodeGen<'ctx> {
             i32t.fn_type(&[ptr.into(), i64t.into(), ptr.into()], true),
             ext,
         );
+        // read_line() 用: char* fgets(char*, int, FILE*)、i64 strcspn(char*, char*)、
+        // および stdin (FILE*) のグローバル（シンボル名は OS で異なる）。
+        self.module.add_function(
+            "fgets",
+            ptr.fn_type(&[ptr.into(), i32t.into(), ptr.into()], false),
+            ext,
+        );
+        self.module.add_function(
+            "strcspn",
+            i64t.fn_type(&[ptr.into(), ptr.into()], false),
+            ext,
+        );
+        let stdin_g = self.module.add_global(ptr, None, stdin_symbol());
+        stdin_g.set_linkage(Linkage::External);
 
         // ヒープ確保のチョークポイント。今は malloc を呼ぶだけ（回収なし）。
         // 将来ここを arena/region アロケータに差し替える（RFC 0001）。
@@ -667,6 +691,76 @@ impl<'ctx> CodeGen<'ctx> {
                         (n, Type::Int)
                     }
                 }
+            }
+            ExprKind::Call { name, .. } if name == "read_line" => {
+                // stdin から1行読む。EOF なら null、そうでなければ末尾改行を取り除いた文字列。
+                let n = 4096u64;
+                let alloc = self.module.get_function("lumo_alloc").unwrap();
+                let buf = self
+                    .builder
+                    .build_call(
+                        alloc,
+                        &[self.ctx.i64_type().const_int(n, false).into()],
+                        "linebuf",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+                let stdin_g = self.module.get_global(stdin_symbol()).unwrap();
+                let stdin_val = self
+                    .builder
+                    .build_load(
+                        self.ctx.ptr_type(AddressSpace::default()),
+                        stdin_g.as_pointer_value(),
+                        "stdin",
+                    )
+                    .unwrap();
+                let fgets = self.module.get_function("fgets").unwrap();
+                let r = self
+                    .builder
+                    .build_call(
+                        fgets,
+                        &[
+                            buf.into(),
+                            self.ctx.i32_type().const_int(n, false).into(),
+                            stdin_val.into(),
+                        ],
+                        "line",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+                // r が null でなければ末尾改行を strcspn で切り落とす。r 自体(buf or null)を返す。
+                let isnull = self.builder.build_is_null(r, "eof").unwrap();
+                let function = self.cur_function();
+                let strip_bb = self.ctx.append_basic_block(function, "rl.strip");
+                let after_bb = self.ctx.append_basic_block(function, "rl.after");
+                self.builder
+                    .build_conditional_branch(isnull, after_bb, strip_bb)
+                    .unwrap();
+                self.builder.position_at_end(strip_bb);
+                let nl = self.global_str("\n", "nl_str");
+                let strcspn = self.module.get_function("strcspn").unwrap();
+                let idx = self
+                    .builder
+                    .build_call(strcspn, &[buf.into(), nl.into()], "nlpos")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_int_value();
+                let addr = unsafe {
+                    self.builder
+                        .build_in_bounds_gep(self.ctx.i8_type(), buf, &[idx], "nladdr")
+                        .unwrap()
+                };
+                self.builder
+                    .build_store(addr, self.ctx.i8_type().const_int(0, false))
+                    .unwrap();
+                self.builder.build_unconditional_branch(after_bb).unwrap();
+                self.builder.position_at_end(after_bb);
+                (r.into(), Type::Str)
             }
             ExprKind::Call { name, args } if name == "chr" => {
                 // バイト値を 1 文字（NUL 終端）のヒープ文字列にする

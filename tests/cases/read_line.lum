@@ -1,0 +1,22 @@
+# read_line(): read stdin until EOF (null), summing the numbers on each line
+fn parse_int(s: string) -> int {
+    let n = 0;
+    for (let i = 0; i < len(s); i = i + 1) {
+        n = n * 10 + (s[i] - 48);
+    }
+    return n;
+}
+
+fn main() {
+    let total = 0;
+    let count = 0;
+    let line = read_line();
+    while (line != null) {
+        total = total + parse_int(line);
+        count = count + 1;
+        line = read_line();
+    }
+    print count;     # number of lines
+    print total;     # sum
+    return 0;
+}
