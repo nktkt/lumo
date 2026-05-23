@@ -320,6 +320,12 @@ fn oob_runtime_check() {
     run_err("oob", "out of bounds");
 }
 
+/// Integer division by zero aborts at runtime.
+#[test]
+fn div_zero_runtime_check() {
+    run_err("div_zero", "division by zero");
+}
+
 #[test]
 fn err_unknown_field() {
     run_err("err_unknown_field", "E0306");

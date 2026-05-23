@@ -886,9 +886,28 @@ impl<'ctx> CodeGen<'ctx> {
         def.iter().find(|(n, _)| n == field).unwrap().1
     }
 
+    /// 0 除算チェック: 除数が 0 なら異常終了する。整数の `/` `%` のみで使う
+    /// (float の 0 除算は IEEE で inf/nan になり UB ではないので対象外)。
+    fn divide_check(&mut self, divisor: inkwell::values::IntValue<'ctx>) {
+        let zero = self.ctx.i64_type().const_int(0, false);
+        let is_zero = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, divisor, zero, "divzero")
+            .unwrap();
+        let function = self.cur_function();
+        let fail_bb = self.ctx.append_basic_block(function, "div.fail");
+        let ok_bb = self.ctx.append_basic_block(function, "div.ok");
+        self.builder
+            .build_conditional_branch(is_zero, fail_bb, ok_bb)
+            .unwrap();
+        self.builder.position_at_end(fail_bb);
+        self.panic("lumo: division by zero\n", "divzero_msg");
+        self.builder.position_at_end(ok_bb);
+    }
+
     /// 算術・比較演算（論理を除く二項演算）。`ty` は両辺の型（typeck が一致を保証）。
     fn gen_arith_or_cmp(
-        &self,
+        &mut self,
         op: BinOp,
         l: BasicValueEnum<'ctx>,
         r: BasicValueEnum<'ctx>,
@@ -897,8 +916,8 @@ impl<'ctx> CodeGen<'ctx> {
         if ty == Type::Str {
             return self.gen_str_binop(op, l, r);
         }
-        let b = &self.builder;
         if ty == Type::Float {
+            let b = &self.builder;
             let l = l.into_float_value();
             let r = r.into_float_value();
             match op {
@@ -927,17 +946,38 @@ impl<'ctx> CodeGen<'ctx> {
             let l = l.into_int_value();
             let r = r.into_int_value();
             match op {
-                BinOp::Add => (b.build_int_add(l, r, "add").unwrap().into(), Type::Int),
-                BinOp::Sub => (b.build_int_sub(l, r, "sub").unwrap().into(), Type::Int),
-                BinOp::Mul => (b.build_int_mul(l, r, "mul").unwrap().into(), Type::Int),
-                BinOp::Div => (
-                    b.build_int_signed_div(l, r, "div").unwrap().into(),
+                BinOp::Add => (
+                    self.builder.build_int_add(l, r, "add").unwrap().into(),
                     Type::Int,
                 ),
-                BinOp::Mod => (
-                    b.build_int_signed_rem(l, r, "rem").unwrap().into(),
+                BinOp::Sub => (
+                    self.builder.build_int_sub(l, r, "sub").unwrap().into(),
                     Type::Int,
                 ),
+                BinOp::Mul => (
+                    self.builder.build_int_mul(l, r, "mul").unwrap().into(),
+                    Type::Int,
+                ),
+                BinOp::Div => {
+                    self.divide_check(r);
+                    (
+                        self.builder
+                            .build_int_signed_div(l, r, "div")
+                            .unwrap()
+                            .into(),
+                        Type::Int,
+                    )
+                }
+                BinOp::Mod => {
+                    self.divide_check(r);
+                    (
+                        self.builder
+                            .build_int_signed_rem(l, r, "rem")
+                            .unwrap()
+                            .into(),
+                        Type::Int,
+                    )
+                }
                 BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                     let pred = match op {
                         BinOp::Eq => IntPredicate::EQ,
@@ -949,7 +989,10 @@ impl<'ctx> CodeGen<'ctx> {
                         _ => unreachable!(),
                     };
                     (
-                        b.build_int_compare(pred, l, r, "cmp").unwrap().into(),
+                        self.builder
+                            .build_int_compare(pred, l, r, "cmp")
+                            .unwrap()
+                            .into(),
                         Type::Bool,
                     )
                 }

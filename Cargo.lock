@@ -82,7 +82,7 @@ dependencies = [
 
 [[package]]
 name = "lumo"
-version = "0.18.0"
+version = "0.18.1"
 dependencies = [
  "inkwell",
 ]
