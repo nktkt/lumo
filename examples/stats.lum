@@ -3,8 +3,8 @@
 
 fn mean(xs: [float]) -> float {
     let sum = 0.0;
-    for (let i = 0; i < len(xs); i = i + 1) {
-        sum = sum + xs[i];
+    for (x in xs) {
+        sum = sum + x;
     }
     return sum / float(len(xs));
 }
@@ -12,8 +12,8 @@ fn mean(xs: [float]) -> float {
 fn stddev(xs: [float]) -> float {
     let m = mean(xs);
     let acc = 0.0;
-    for (let i = 0; i < len(xs); i = i + 1) {
-        acc = acc + pow(xs[i] - m, 2.0);
+    for (x in xs) {
+        acc = acc + pow(x - m, 2.0);
     }
     return sqrt(acc / float(len(xs)));
 }
@@ -23,9 +23,9 @@ fn main() {
 
     let lo = xs[0];
     let hi = xs[0];
-    for (let i = 1; i < len(xs); i = i + 1) {
-        lo = min(lo, xs[i]);
-        hi = max(hi, xs[i]);
+    for (x in xs) {
+        lo = min(lo, x);
+        hi = max(hi, x);
     }
 
     print "n      = " + str(len(xs));

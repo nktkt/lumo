@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.25.0]
+
+### Added
+
+- **`for`-`in` loops.** `for (x in collection) { ... }` iterates a collection: over an array, `x` is each element; over a map, `x` is each key (look the value up with `m[x]`). The loop variable is scoped to the loop, and `break`/`continue` work as usual. This replaces the `keys(m)` + index-loop boilerplate for the common iteration cases. (`in` is now a keyword.)
+
 ## [0.24.1]
 
 ### Changed

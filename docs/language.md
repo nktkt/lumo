@@ -238,6 +238,28 @@ for (let i = 0; i < 5; i = i + 1) {
 }
 ```
 
+### `for`-`in`
+
+`for (x in collection) { ... }` iterates a collection, binding `x` to each item:
+
+- over an **array** `[T]`, `x` is each element (type `T`);
+- over a **map** `{string: V}`, `x` is each **key** (a `string`) — look the value
+  up with `m[x]`. The order is unspecified.
+
+The loop variable is scoped to the loop. `break` and `continue` work as usual.
+(The array's length is read once, at the start of the loop.)
+
+```lumo
+let xs = [10, 20, 30];
+let sum = 0;
+for (v in xs) { sum = sum + v; }      # 60
+
+let counts = {"a": 2, "b": 5};
+for (k in counts) {
+    print k + " = " + str(counts[k]);
+}
+```
+
 ### `break` and `continue`
 
 `break` leaves the nearest enclosing loop. `continue` skips to the next
@@ -622,6 +644,7 @@ statement   = let_stmt
             | if_stmt
             | while_stmt
             | for_stmt
+            | forin_stmt
             | break_stmt
             | continue_stmt
             | expr_stmt ;
@@ -633,6 +656,7 @@ print_stmt  = "print" expr ";" ;
 if_stmt     = "if" "(" expr ")" block [ "else" block ] ;
 while_stmt  = "while" "(" expr ")" block ;
 for_stmt    = "for" "(" [ simple ] ";" expr ";" [ simple ] ")" block ;
+forin_stmt  = "for" "(" ident "in" expr ")" block ;
 break_stmt  = "break" ";" ;
 continue_stmt = "continue" ";" ;
 expr_stmt   = expr ";" ;

@@ -33,8 +33,8 @@ fn main() {
         i = i + 1;
     }
 
-    for (let k = 0; k < len(ks); k = k + 1) {
-        print ks[k] + ": " + str(counts[ks[k]]);
+    for (word in ks) {
+        print word + ": " + str(counts[word]);
     }
     return 0;
 }

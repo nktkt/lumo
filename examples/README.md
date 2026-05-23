@@ -50,10 +50,10 @@ Listed from simplest to most advanced:
 | [`arrays.lum`](arrays.lum) | Array types `[int]` with literals, indexed read/write `a[i]`, and `len()` — a `max` helper and an in-place bubble sort. |
 | [`sort.lum`](sort.lum) | Lexicographic string ordering — `<` / `>` comparisons on strings driving an insertion sort over an array of fruit names. |
 | [`primes.lum`](primes.lum) | Growable arrays — starting from an empty literal (`let primes: [int] = [];`) and using the `push(a, x)` built-in to collect an unknown number of primes. |
-| [`stats.lum`](stats.lum) | The math built-ins — `mean` and standard deviation over a `[float]` using `sqrt`, `pow`, `min`, and `max`. |
+| [`stats.lum`](stats.lum) | The math built-ins — `mean` and standard deviation over a `[float]` using `sqrt`, `pow`, `min`, and `max`, with `for`-`in` loops over the array. |
 | [`cipher.lum`](cipher.lum) | The `chr()` built-in with string indexing `s[i]` and `+` — a Caesar cipher that shifts and rebuilds lowercase letters, then decrypts. |
 | [`structs.lum`](structs.lum) | Structs — `struct` declarations, `Name { field: value }` construction, `obj.field` read/write, nested struct-typed fields, and field mutation. |
 | [`points.lum`](points.lum) | Arrays of structs `[Point]` — indexing yields a reference, so `ps[i].x` reads and mutates in place while computing a centroid. |
 | [`sum_stdin.lum`](sum_stdin.lum) | Reading input — `read_line()` returning a line or `null` at end of input, looped to parse and sum integers piped on stdin. |
-| [`wordcount.lum`](wordcount.lum) | Maps — tally word frequencies from stdin in a `{string: int}`, then print each unique word and count using `has`, `keys`, and a sort. |
+| [`wordcount.lum`](wordcount.lum) | Maps — tally word frequencies from stdin in a `{string: int}`, then print each unique word and count using `has`, `keys`, a sort, and a `for`-`in` loop. |
 | [`linked_list.lum`](linked_list.lum) | `null` as a nullable reference plus a self-referential `struct Node` — a recursive linked list with prepend, traversal, and in-place reversal. |

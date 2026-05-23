@@ -54,7 +54,7 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.24, in progress)
+## Language (v0.25, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
@@ -74,7 +74,7 @@ See **[docs/language.md](docs/language.md)** for the full reference, or
 - Comparison: `== != < <= > >=` (yields a `bool`)
 - Logical: `&&`, `||` (short-circuit), `!` — operate on `bool`
 - Variables: `let x = expr;` and assignment `x = expr;` (assignment must keep the same type)
-- Control flow: `if/else`, `while`, `for (init; cond; step)`, `break`, `continue` — conditions must be `bool`
+- Control flow: `if/else`, `while`, `for (init; cond; step)`, `for (x in coll)` (arrays/maps), `break`, `continue` — conditions must be `bool`
 - Functions with **typed signatures**: `fn name(p: int, q: float) -> bool { ... }`
   - Parameter types are required; the return type is optional and defaults to `int`
   - `int`, `bool`, and `float` may all be passed and returned; recursion and mutual recursion supported

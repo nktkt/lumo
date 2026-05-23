@@ -1,0 +1,56 @@
+# for-in loops: iterate an array's elements, or a map's keys.
+
+struct P { x: int, y: int }
+
+fn main() {
+    # array of ints
+    let xs = [10, 20, 30, 40];
+    let sum = 0;
+    for (v in xs) {
+        sum = sum + v;
+    }
+    print sum;                    # 100
+
+    # break / continue
+    let s2 = 0;
+    for (v in [1, 2, 3, 4, 5, 6]) {
+        if (v == 5) { break; }
+        if (v % 2 == 0) { continue; }
+        s2 = s2 + v;              # 1 + 3 = 4
+    }
+    print s2;                     # 4
+
+    # array of strings
+    for (w in ["a", "b", "c"]) {
+        print w;                  # a / b / c
+    }
+
+    # array of structs (element is a reference)
+    let ps = [P { x: 1, y: 2 }, P { x: 3, y: 4 }];
+    let t = 0;
+    for (p in ps) {
+        t = t + p.x + p.y;
+    }
+    print t;                      # 10
+
+    # map: iterate keys; sum is order-independent
+    let m = {"one": 1, "two": 2, "three": 3};
+    let total = 0;
+    let n = 0;
+    for (k in m) {
+        total = total + m[k];
+        n = n + 1;
+    }
+    print total;                  # 6
+    print n;                      # 3
+
+    # nested for-in
+    let grid = 0;
+    for (a in [1, 2]) {
+        for (b in [10, 20]) {
+            grid = grid + a * b;
+        }
+    }
+    print grid;                   # 90
+    return 0;
+}

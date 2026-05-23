@@ -1459,6 +1459,111 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.position_at_end(end_bb);
                 self.pop_scope(); // for 自体のスコープ
             }
+            StmtKind::ForIn { var, iter, body } => {
+                // 反復対象を配列ヘッダに正規化する（map はキー配列を作る）。要素型も決める。
+                let (iv, ity) = self.gen_expr(iter);
+                let (arr, elem_ty) = match ity {
+                    Type::Array(e) => (iv.into_pointer_value(), e.to_type()),
+                    Type::Map(_) => {
+                        let keysf = self.module.get_function("lumo_map_keys").unwrap();
+                        let ks = self
+                            .builder
+                            .build_call(keysf, &[iv.into()], "keys")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .unwrap_basic()
+                            .into_pointer_value();
+                        (ks, Type::Str)
+                    }
+                    _ => unreachable!("typeck guarantees an array or map here"),
+                };
+                self.null_check(arr);
+                let i64t = self.ctx.i64_type();
+                let ptrt = self.ctx.ptr_type(AddressSpace::default());
+                // len / data はループ開始時に1度だけ読む（長さスナップショット）
+                let len = self
+                    .builder
+                    .build_load(i64t, arr, "len")
+                    .unwrap()
+                    .into_int_value();
+                let data = self
+                    .builder
+                    .build_load(ptrt, self.hdr_field(arr, 16), "data")
+                    .unwrap()
+                    .into_pointer_value();
+                let i_ptr = self.builder.build_alloca(i64t, "i").unwrap();
+                self.builder.build_store(i_ptr, i64t.const_zero()).unwrap();
+                // ループ変数を専用スコープに束縛する
+                self.push_scope();
+                let var_alloca = self
+                    .builder
+                    .build_alloca(self.basic_ty(elem_ty), var)
+                    .unwrap();
+                self.declare_var(var, var_alloca, elem_ty);
+
+                let cond_bb = self.ctx.append_basic_block(function, "forin.cond");
+                let body_bb = self.ctx.append_basic_block(function, "forin.body");
+                let step_bb = self.ctx.append_basic_block(function, "forin.step");
+                let end_bb = self.ctx.append_basic_block(function, "forin.end");
+                self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                // cond: i < len
+                self.builder.position_at_end(cond_bb);
+                let iv = self
+                    .builder
+                    .build_load(i64t, i_ptr, "i")
+                    .unwrap()
+                    .into_int_value();
+                let c = self
+                    .builder
+                    .build_int_compare(IntPredicate::ULT, iv, len, "cmp")
+                    .unwrap();
+                self.builder
+                    .build_conditional_branch(c, body_bb, end_bb)
+                    .unwrap();
+
+                // body: var = data[i]; 本体（continue は step へ、break は末尾へ）
+                self.builder.position_at_end(body_bb);
+                let off = self
+                    .builder
+                    .build_int_mul(iv, i64t.const_int(8, false), "off")
+                    .unwrap();
+                let addr = unsafe {
+                    self.builder
+                        .build_in_bounds_gep(self.ctx.i8_type(), data, &[off], "slot")
+                        .unwrap()
+                };
+                let el = self
+                    .builder
+                    .build_load(self.basic_ty(elem_ty), addr, "el")
+                    .unwrap();
+                self.builder.build_store(var_alloca, el).unwrap();
+                self.loop_stack.push((step_bb, end_bb));
+                self.push_scope();
+                self.gen_block(body, function);
+                self.pop_scope();
+                self.loop_stack.pop();
+                if self.block_open() {
+                    self.builder.build_unconditional_branch(step_bb).unwrap();
+                }
+
+                // step: i++
+                self.builder.position_at_end(step_bb);
+                let iv2 = self
+                    .builder
+                    .build_load(i64t, i_ptr, "i")
+                    .unwrap()
+                    .into_int_value();
+                let i1 = self
+                    .builder
+                    .build_int_add(iv2, i64t.const_int(1, false), "i1")
+                    .unwrap();
+                self.builder.build_store(i_ptr, i1).unwrap();
+                self.builder.build_unconditional_branch(cond_bb).unwrap();
+
+                self.builder.position_at_end(end_bb);
+                self.pop_scope(); // ループ変数のスコープ
+            }
             StmtKind::Break => {
                 let (_, brk) = *self.loop_stack.last().unwrap();
                 self.builder.build_unconditional_branch(brk).unwrap();

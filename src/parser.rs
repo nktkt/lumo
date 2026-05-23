@@ -31,6 +31,18 @@ impl Parser {
         &self.toks[self.pos].kind
     }
 
+    /// 1つ先のトークン（for-in の `x in` 判定などの 2 トークン先読み用）。
+    /// 末尾は Eof なので範囲外でも Eof を返す。
+    fn peek2(&self) -> &Tok {
+        let i = self.pos + 1;
+        let i = if i < self.toks.len() {
+            i
+        } else {
+            self.toks.len() - 1
+        };
+        &self.toks[i].kind
+    }
+
     fn cur_span(&self) -> Span {
         self.toks[self.pos].span
     }
@@ -293,27 +305,37 @@ impl Parser {
             Tok::For => {
                 self.next();
                 self.eat(&Tok::LParen)?;
-                // for (init; cond; step) — init と step は省略可
-                let init = if self.peek() == &Tok::Semicolon {
-                    None
+                // for-in: `for (x in iter)` — 先頭が `Ident in` ならこちら
+                if matches!(self.peek(), Tok::Ident(_)) && self.peek2() == &Tok::In {
+                    let (var, _) = self.parse_ident()?;
+                    self.eat(&Tok::In)?;
+                    let iter = self.parse_expr()?;
+                    self.eat(&Tok::RParen)?;
+                    let body = self.parse_block()?;
+                    StmtKind::ForIn { var, iter, body }
                 } else {
-                    Some(Box::new(self.parse_simple()?))
-                };
-                self.eat(&Tok::Semicolon)?;
-                let cond = self.parse_expr()?;
-                self.eat(&Tok::Semicolon)?;
-                let step = if self.peek() == &Tok::RParen {
-                    None
-                } else {
-                    Some(Box::new(self.parse_simple()?))
-                };
-                self.eat(&Tok::RParen)?;
-                let body = self.parse_block()?;
-                StmtKind::For {
-                    init,
-                    cond,
-                    step,
-                    body,
+                    // for (init; cond; step) — init と step は省略可
+                    let init = if self.peek() == &Tok::Semicolon {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_simple()?))
+                    };
+                    self.eat(&Tok::Semicolon)?;
+                    let cond = self.parse_expr()?;
+                    self.eat(&Tok::Semicolon)?;
+                    let step = if self.peek() == &Tok::RParen {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_simple()?))
+                    };
+                    self.eat(&Tok::RParen)?;
+                    let body = self.parse_block()?;
+                    StmtKind::For {
+                        init,
+                        cond,
+                        step,
+                        body,
+                    }
                 }
             }
             Tok::Break => {
