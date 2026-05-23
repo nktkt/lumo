@@ -253,6 +253,11 @@ fn map_missing_key_aborts() {
     run_err("map_missing", "key not found");
 }
 
+#[test]
+fn for_in_loops() {
+    run_ok("for_in");
+}
+
 /// Capstone: read an unknown number of lines, collect them with `push`, sort.
 #[test]
 fn sort_lines_stdin() {

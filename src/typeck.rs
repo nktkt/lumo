@@ -332,6 +332,29 @@ impl FnChecker<'_> {
                 }
                 self.pop_scope();
             }
+            StmtKind::ForIn { var, iter, body } => {
+                // 配列なら各要素(要素型)、map なら各キー(string)を束縛する
+                let it = self.check_expr(iter)?;
+                let elem = match it {
+                    Type::Array(e) => e.to_type(),
+                    Type::Map(_) => Type::Str,
+                    other => {
+                        return Err(Diagnostic::error(format!(
+                            "for-in でくり返せるのは配列か map ですが {} が使われています",
+                            other.name()
+                        ))
+                        .with_code("E0205")
+                        .at(iter.span));
+                    }
+                };
+                // ループ変数を専用スコープに束縛して本体を検査する
+                self.push_scope();
+                self.declare(var, elem);
+                self.loops += 1;
+                self.check_block(body)?;
+                self.loops -= 1;
+                self.pop_scope();
+            }
             StmtKind::Break => {
                 if self.loops == 0 {
                     return Err(Diagnostic::error("break はループの外では使えません")

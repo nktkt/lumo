@@ -124,6 +124,12 @@ pub enum StmtKind {
         step: Option<Box<Stmt>>,
         body: Vec<Stmt>,
     },
+    /// for (var in iter) { body } — 配列なら各要素、map なら各キーを順に束縛する
+    ForIn {
+        var: String,
+        iter: Expr,
+        body: Vec<Stmt>,
+    },
     Break,
     Continue,
     ExprStmt(Expr),
