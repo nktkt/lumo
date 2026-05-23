@@ -752,6 +752,42 @@ impl FnChecker<'_> {
                     return Ok(Type::Str);
                 }
 
+                // 文字列メソッド: to_upper/to_lower/trim は (string) -> string
+                if matches!(name.as_str(), "to_upper" | "to_lower" | "trim") {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は引数1個ですが {} 個渡されました",
+                            name,
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    return Ok(Type::Str);
+                }
+
+                // 文字列メソッド: find(s, sub) -> int（最初の出現位置、無ければ -1）、
+                // contains(s, sub) -> bool。どちらも (string, string)。
+                if matches!(name.as_str(), "find" | "contains") {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は引数2個ですが {} 個渡されました",
+                            name,
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(if name == "find" {
+                        Type::Int
+                    } else {
+                        Type::Bool
+                    });
+                }
+
                 // 数学組み込み: sqrt/floor/ceil は float -> float
                 if matches!(name.as_str(), "sqrt" | "floor" | "ceil") {
                     if args.len() != 1 {
@@ -1078,6 +1114,11 @@ fn is_reserved_name(name: &str) -> bool {
             | "is_float"
             | "read_file"
             | "write_file"
+            | "to_upper"
+            | "to_lower"
+            | "trim"
+            | "find"
+            | "contains"
     )
 }
 

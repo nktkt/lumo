@@ -1,0 +1,37 @@
+# String methods: case conversion, trimming, and substring search.
+
+fn main() {
+    # case conversion (ASCII; non-letters pass through)
+    print to_upper("Hello, World! 123");   # HELLO, WORLD! 123
+    print to_lower("Hello, World! 123");    # hello, world! 123
+    print to_upper("");                     # (empty line)
+
+    # trim strips leading/trailing ASCII whitespace
+    print "[" + trim("  spaced out  ") + "]";   # [spaced out]
+    print "[" + trim("\t\n hi \r\n") + "]";     # [hi]
+    print "[" + trim("noedge") + "]";           # [noedge]
+    print "[" + trim("   ") + "]";              # []
+
+    # find: byte index of first occurrence, or -1
+    print find("hello world", "world");     # 6
+    print find("hello world", "o");         # 4
+    print find("hello", "xyz");             # -1
+    print find("hello", "");                # 0   (empty matches at 0)
+    print find("abc", "abcd");              # -1  (needle longer than haystack)
+    print find("aaa", "aa");                # 0   (first, not overlapping rest)
+
+    # contains is find(...) >= 0
+    print contains("hello world", "world"); # true
+    print contains("hello", "xyz");         # false
+    print contains("hello", "");            # true
+
+    # methods compose: normalize, then search
+    print contains(to_lower("SHOUTING"), "out");   # true
+
+    # a tiny real use: clean and classify a line of input
+    let line = "  Yes  ";
+    let norm = to_lower(trim(line));
+    print norm;                             # yes
+    print contains(norm, "es");             # true
+    return 0;
+}

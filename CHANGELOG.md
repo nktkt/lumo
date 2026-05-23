@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.30.0]
+
+### Added
+
+- **String methods** — case, trimming, and substring search:
+  - `to_upper(s)` / `to_lower(s)` → a new string with ASCII letters re-cased (other bytes unchanged).
+  - `trim(s)` → a new string with leading/trailing ASCII whitespace (space, tab, `\n`, `\r`) removed.
+  - `find(s, sub)` → the byte index of the first occurrence of `sub`, or `-1` (an empty `sub` returns `0`).
+  - `contains(s, sub)` → `bool`, true when `sub` occurs in `s`.
+- `examples/tags.lum`: clean and search a comma-separated tag list (`split` + `trim` + `to_lower` + `contains`).
+
+### Notes
+
+- These return freshly allocated strings; the input is never modified. To replace text, combine the existing `split`/`join`: `join(split(s, old), new)`. A dedicated `replace` may come later.
+
 ## [0.29.0]
 
 ### Added

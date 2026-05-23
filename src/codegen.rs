@@ -1366,6 +1366,354 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder.build_store(bend, i8t.const_zero()).unwrap();
             self.builder.build_return(Some(&buf)).unwrap();
         }
+
+        // --- ptr lumo_to_case(ptr s, i1 upper): ASCII で大文字/小文字化した新規文字列 ---
+        // upper=1 なら a-z を A-Z に、0 なら A-Z を a-z に。他のバイトは素通し。
+        let case_fn = self.module.add_function(
+            "lumo_to_case",
+            ptr.fn_type(&[ptr.into(), i1t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(case_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(case_fn, "loop");
+            let body_bb = self.ctx.append_basic_block(case_fn, "body");
+            let fin_bb = self.ctx.append_basic_block(case_fn, "fin");
+            let s = case_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let upper = case_fn.get_nth_param(1).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let len = self
+                .builder
+                .build_call(strlen, &[s.into()], "len")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let size = self
+                .builder
+                .build_int_add(len, i64t.const_int(1, false), "size")
+                .unwrap();
+            let buf = self
+                .builder
+                .build_call(alloc, &[size.into()], "buf")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let i_ptr = self.builder.build_alloca(i64t, "i").unwrap();
+            self.builder.build_store(i_ptr, i64t.const_zero()).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(loop_bb);
+            let iv = self
+                .builder
+                .build_load(i64t, i_ptr, "i")
+                .unwrap()
+                .into_int_value();
+            let done = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, iv, len, "done")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(done, fin_bb, body_bb)
+                .unwrap();
+            self.builder.position_at_end(body_bb);
+            let sa = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, s, &[iv], "sa")
+                    .unwrap()
+            };
+            let c = self
+                .builder
+                .build_load(i8t, sa, "c")
+                .unwrap()
+                .into_int_value();
+            let d32 = i8t.const_int(32, false);
+            // lower->upper: 'a'(97)..='z'(122) なら -32
+            let ge_lo = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, c, i8t.const_int(97, false), "ge_lo")
+                .unwrap();
+            let le_lo = self
+                .builder
+                .build_int_compare(IntPredicate::ULE, c, i8t.const_int(122, false), "le_lo")
+                .unwrap();
+            let is_lower = self.builder.build_and(ge_lo, le_lo, "is_lower").unwrap();
+            let upped = self.builder.build_int_sub(c, d32, "upped").unwrap();
+            let c_up = self
+                .builder
+                .build_select(is_lower, upped, c, "c_up")
+                .unwrap()
+                .into_int_value();
+            // upper->lower: 'A'(65)..='Z'(90) なら +32
+            let ge_up = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, c, i8t.const_int(65, false), "ge_up")
+                .unwrap();
+            let le_up = self
+                .builder
+                .build_int_compare(IntPredicate::ULE, c, i8t.const_int(90, false), "le_up")
+                .unwrap();
+            let is_upper = self.builder.build_and(ge_up, le_up, "is_upper").unwrap();
+            let lowed = self.builder.build_int_add(c, d32, "lowed").unwrap();
+            let c_lo = self
+                .builder
+                .build_select(is_upper, lowed, c, "c_lo")
+                .unwrap()
+                .into_int_value();
+            let c2 = self
+                .builder
+                .build_select(upper, c_up, c_lo, "c2")
+                .unwrap()
+                .into_int_value();
+            let ba = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[iv], "ba")
+                    .unwrap()
+            };
+            self.builder.build_store(ba, c2).unwrap();
+            let inext = self
+                .builder
+                .build_int_add(iv, i64t.const_int(1, false), "inext")
+                .unwrap();
+            self.builder.build_store(i_ptr, inext).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(fin_bb);
+            let bend = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[len], "bend")
+                    .unwrap()
+            };
+            self.builder.build_store(bend, i8t.const_zero()).unwrap();
+            self.builder.build_return(Some(&buf)).unwrap();
+        }
+
+        // --- i64 lumo_find(ptr s, ptr sub): sub の最初の出現バイト位置、無ければ -1 ---
+        // 空の sub は 0 を返す（位置 0 で一致）。
+        let find_fn = self.module.add_function(
+            "lumo_find",
+            i64t.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(find_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(find_fn, "loop");
+            let body_bb = self.ctx.append_basic_block(find_fn, "body");
+            let found_bb = self.ctx.append_basic_block(find_fn, "found");
+            let next_bb = self.ctx.append_basic_block(find_fn, "next");
+            let nf_bb = self.ctx.append_basic_block(find_fn, "notfound");
+            let s = find_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let sub = find_fn.get_nth_param(1).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let slen = self
+                .builder
+                .build_call(strlen, &[s.into()], "slen")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let sublen = self
+                .builder
+                .build_call(strlen, &[sub.into()], "sublen")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            // limit = slen - sublen（符号付き。負なら走査しない＝見つからない）
+            let limit = self.builder.build_int_sub(slen, sublen, "limit").unwrap();
+            let i_ptr = self.builder.build_alloca(i64t, "i").unwrap();
+            self.builder.build_store(i_ptr, i64t.const_zero()).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(loop_bb);
+            let iv = self
+                .builder
+                .build_load(i64t, i_ptr, "i")
+                .unwrap()
+                .into_int_value();
+            let cont = self
+                .builder
+                .build_int_compare(IntPredicate::SLE, iv, limit, "cont")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(cont, body_bb, nf_bb)
+                .unwrap();
+            self.builder.position_at_end(body_bb);
+            let eqat = self.module.get_function("lumo_str_eq_at").unwrap();
+            let eq = self
+                .builder
+                .build_call(
+                    eqat,
+                    &[s.into(), iv.into(), sub.into(), sublen.into()],
+                    "eq",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            self.builder
+                .build_conditional_branch(eq, found_bb, next_bb)
+                .unwrap();
+            self.builder.position_at_end(found_bb);
+            self.builder.build_return(Some(&iv)).unwrap();
+            self.builder.position_at_end(next_bb);
+            let inext = self
+                .builder
+                .build_int_add(iv, i64t.const_int(1, false), "inext")
+                .unwrap();
+            self.builder.build_store(i_ptr, inext).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(nf_bb);
+            self.builder
+                .build_return(Some(&i64t.const_all_ones()))
+                .unwrap();
+        }
+
+        // --- ptr lumo_trim(ptr s): 前後の ASCII 空白(空白/タブ/改行/復帰)を除いた新規文字列 ---
+        let trim_fn =
+            self.module
+                .add_function("lumo_trim", ptr.fn_type(&[ptr.into()], false), None);
+        {
+            let entry = self.ctx.append_basic_block(trim_fn, "entry");
+            let sloop = self.ctx.append_basic_block(trim_fn, "sloop");
+            let scheck = self.ctx.append_basic_block(trim_fn, "scheck");
+            let sinc = self.ctx.append_basic_block(trim_fn, "sinc");
+            let sdone = self.ctx.append_basic_block(trim_fn, "sdone");
+            let eloop = self.ctx.append_basic_block(trim_fn, "eloop");
+            let echeck = self.ctx.append_basic_block(trim_fn, "echeck");
+            let edec = self.ctx.append_basic_block(trim_fn, "edec");
+            let edone = self.ctx.append_basic_block(trim_fn, "edone");
+            let s = trim_fn.get_nth_param(0).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let len = self
+                .builder
+                .build_call(strlen, &[s.into()], "len")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let start_ptr = self.builder.build_alloca(i64t, "start").unwrap();
+            let end_ptr = self.builder.build_alloca(i64t, "end").unwrap();
+            self.builder
+                .build_store(start_ptr, i64t.const_zero())
+                .unwrap();
+            self.builder.build_unconditional_branch(sloop).unwrap();
+            // sloop: while start < len && is_ws(s[start]) start++
+            self.builder.position_at_end(sloop);
+            let st = self
+                .builder
+                .build_load(i64t, start_ptr, "st")
+                .unwrap()
+                .into_int_value();
+            let in_range = self
+                .builder
+                .build_int_compare(IntPredicate::ULT, st, len, "in_range")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(in_range, scheck, sdone)
+                .unwrap();
+            self.builder.position_at_end(scheck);
+            let ca = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, s, &[st], "ca")
+                    .unwrap()
+            };
+            let c = self
+                .builder
+                .build_load(i8t, ca, "c")
+                .unwrap()
+                .into_int_value();
+            let isws = self.byte_is_ws(c);
+            self.builder
+                .build_conditional_branch(isws, sinc, sdone)
+                .unwrap();
+            self.builder.position_at_end(sinc);
+            let st1 = self
+                .builder
+                .build_int_add(st, i64t.const_int(1, false), "st1")
+                .unwrap();
+            self.builder.build_store(start_ptr, st1).unwrap();
+            self.builder.build_unconditional_branch(sloop).unwrap();
+            // sdone: end = len; while end > start && is_ws(s[end-1]) end--
+            self.builder.position_at_end(sdone);
+            let start = self
+                .builder
+                .build_load(i64t, start_ptr, "start_v")
+                .unwrap()
+                .into_int_value();
+            self.builder.build_store(end_ptr, len).unwrap();
+            self.builder.build_unconditional_branch(eloop).unwrap();
+            self.builder.position_at_end(eloop);
+            let en = self
+                .builder
+                .build_load(i64t, end_ptr, "en")
+                .unwrap()
+                .into_int_value();
+            let gt = self
+                .builder
+                .build_int_compare(IntPredicate::UGT, en, start, "gt")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(gt, echeck, edone)
+                .unwrap();
+            self.builder.position_at_end(echeck);
+            let enm1 = self
+                .builder
+                .build_int_sub(en, i64t.const_int(1, false), "enm1")
+                .unwrap();
+            let cb = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, s, &[enm1], "cb")
+                    .unwrap()
+            };
+            let c2 = self
+                .builder
+                .build_load(i8t, cb, "c2")
+                .unwrap()
+                .into_int_value();
+            let isws2 = self.byte_is_ws(c2);
+            self.builder
+                .build_conditional_branch(isws2, edec, edone)
+                .unwrap();
+            self.builder.position_at_end(edec);
+            self.builder.build_store(end_ptr, enm1).unwrap();
+            self.builder.build_unconditional_branch(eloop).unwrap();
+            // edone: count = end - start; return lumo_substr(s, start, count)
+            self.builder.position_at_end(edone);
+            let end = self
+                .builder
+                .build_load(i64t, end_ptr, "end_v")
+                .unwrap()
+                .into_int_value();
+            let count = self.builder.build_int_sub(end, start, "count").unwrap();
+            let substr = self.module.get_function("lumo_substr").unwrap();
+            let r = self
+                .builder
+                .build_call(substr, &[s.into(), start.into(), count.into()], "trimmed")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic();
+            self.builder.build_return(Some(&r)).unwrap();
+        }
+    }
+
+    /// あるバイト値が ASCII 空白(空白/タブ/改行/復帰)かどうかを表す i1 を作る。
+    fn byte_is_ws(&self, c: inkwell::values::IntValue<'ctx>) -> inkwell::values::IntValue<'ctx> {
+        let i8t = self.ctx.i8_type();
+        let eq = |v: u64, name: &str| {
+            self.builder
+                .build_int_compare(IntPredicate::EQ, c, i8t.const_int(v, false), name)
+                .unwrap()
+        };
+        let e_sp = eq(32, "ws_sp");
+        let e_tab = eq(9, "ws_tab");
+        let e_nl = eq(10, "ws_nl");
+        let e_cr = eq(13, "ws_cr");
+        let o1 = self.builder.build_or(e_sp, e_tab, "ws1").unwrap();
+        let o2 = self.builder.build_or(o1, e_nl, "ws2").unwrap();
+        self.builder.build_or(o2, e_cr, "ws3").unwrap()
     }
 
     /// map のランタイム（分離連鎖ハッシュ表、RFC 0002）を IR で定義する。
@@ -3065,6 +3413,60 @@ impl<'ctx> CodeGen<'ctx> {
                     .try_as_basic_value()
                     .unwrap_basic();
                 (r, Type::Str)
+            }
+            ExprKind::Call { name, args } if name == "to_upper" || name == "to_lower" => {
+                // to_upper/to_lower: lumo_to_case を upper フラグ付きで呼ぶ
+                let (sv, _) = self.gen_expr(&args[0]);
+                let upper = self
+                    .ctx
+                    .bool_type()
+                    .const_int((name == "to_upper") as u64, false);
+                let f = self.module.get_function("lumo_to_case").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[sv.into(), upper.into()], "tocase")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Str)
+            }
+            ExprKind::Call { name, args } if name == "trim" => {
+                let (sv, _) = self.gen_expr(&args[0]);
+                let f = self.module.get_function("lumo_trim").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[sv.into()], "trim")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Str)
+            }
+            ExprKind::Call { name, args } if name == "find" || name == "contains" => {
+                // find は位置(int)、contains は find>=0 の bool
+                let (sv, _) = self.gen_expr(&args[0]);
+                let (subv, _) = self.gen_expr(&args[1]);
+                let f = self.module.get_function("lumo_find").unwrap();
+                let pos = self
+                    .builder
+                    .build_call(f, &[sv.into(), subv.into()], "find")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_int_value();
+                if name == "find" {
+                    (pos.into(), Type::Int)
+                } else {
+                    let found = self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::SGE,
+                            pos,
+                            self.ctx.i64_type().const_zero(),
+                            "contains",
+                        )
+                        .unwrap();
+                    (found.into(), Type::Bool)
+                }
             }
             ExprKind::Call { name, args } if name == "read_file" => {
                 // read_file(path): ファイル全体を文字列で返す。開けなければ null。
