@@ -178,6 +178,12 @@ impl<'ctx> CodeGen<'ctx> {
         let ext = Some(Linkage::External);
         self.module
             .add_function("malloc", ptr.fn_type(&[i64t.into()], false), ext);
+        // void* realloc(void* ptr, size_t size) — 配列を伸ばす push() に使う
+        self.module.add_function(
+            "realloc",
+            ptr.fn_type(&[ptr.into(), i64t.into()], false),
+            ext,
+        );
         self.module
             .add_function("strlen", i64t.fn_type(&[ptr.into()], false), ext);
         self.module
@@ -692,6 +698,100 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
             }
+            ExprKind::Call { name, args } if name == "push" => {
+                // push(arr, x): 末尾に x を追加し、配列(ヘッダ)を返す。容量が足りなければ
+                // data ブロックを realloc で倍増する。ヘッダのポインタは不変。
+                let i64t = self.ctx.i64_type();
+                let ptr = self.ctx.ptr_type(AddressSpace::default());
+                let (arr_v, arr_ty) = self.gen_expr(&args[0]);
+                let hdr = arr_v.into_pointer_value();
+                self.null_check(hdr);
+                let (val, _) = self.gen_expr(&args[1]);
+                // 現在の len / cap を読む
+                let len = self
+                    .builder
+                    .build_load(i64t, hdr, "len")
+                    .unwrap()
+                    .into_int_value();
+                let cap = self
+                    .builder
+                    .build_load(i64t, self.hdr_field(hdr, 8), "cap")
+                    .unwrap()
+                    .into_int_value();
+                // len < cap なら容量十分。そうでなければ grow する。
+                let enough = self
+                    .builder
+                    .build_int_compare(IntPredicate::SLT, len, cap, "enough")
+                    .unwrap();
+                let function = self.cur_function();
+                let grow_bb = self.ctx.append_basic_block(function, "push.grow");
+                let store_bb = self.ctx.append_basic_block(function, "push.store");
+                self.builder
+                    .build_conditional_branch(enough, store_bb, grow_bb)
+                    .unwrap();
+                // grow: newcap = if cap==0 {4} else {cap*2}; data = realloc(data, 8*newcap)
+                self.builder.position_at_end(grow_bb);
+                let data_old = self
+                    .builder
+                    .build_load(ptr, self.hdr_field(hdr, 16), "data.old")
+                    .unwrap()
+                    .into_pointer_value();
+                let is_zero = self
+                    .builder
+                    .build_int_compare(IntPredicate::EQ, cap, i64t.const_zero(), "cap0")
+                    .unwrap();
+                let doubled = self
+                    .builder
+                    .build_int_mul(cap, i64t.const_int(2, false), "cap2")
+                    .unwrap();
+                let newcap = self
+                    .builder
+                    .build_select(is_zero, i64t.const_int(4, false), doubled, "newcap")
+                    .unwrap()
+                    .into_int_value();
+                let newsize = self
+                    .builder
+                    .build_int_mul(newcap, i64t.const_int(8, false), "newsize")
+                    .unwrap();
+                let realloc = self.module.get_function("realloc").unwrap();
+                let newdata = self
+                    .builder
+                    .build_call(realloc, &[data_old.into(), newsize.into()], "rdata")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_pointer_value();
+                self.builder
+                    .build_store(self.hdr_field(hdr, 16), newdata)
+                    .unwrap();
+                self.builder
+                    .build_store(self.hdr_field(hdr, 8), newcap)
+                    .unwrap();
+                self.builder.build_unconditional_branch(store_bb).unwrap();
+                // store: data[len] = val; len = len + 1
+                self.builder.position_at_end(store_bb);
+                let data = self
+                    .builder
+                    .build_load(ptr, self.hdr_field(hdr, 16), "data")
+                    .unwrap()
+                    .into_pointer_value();
+                let off = self
+                    .builder
+                    .build_int_mul(len, i64t.const_int(8, false), "off")
+                    .unwrap();
+                let slot = unsafe {
+                    self.builder
+                        .build_in_bounds_gep(self.ctx.i8_type(), data, &[off], "slot")
+                        .unwrap()
+                };
+                self.builder.build_store(slot, val).unwrap();
+                let newlen = self
+                    .builder
+                    .build_int_add(len, i64t.const_int(1, false), "newlen")
+                    .unwrap();
+                self.builder.build_store(hdr, newlen).unwrap();
+                (hdr.into(), arr_ty)
+            }
             ExprKind::Call { name, .. } if name == "read_line" => {
                 // stdin から1行読む。EOF なら null、そうでなければ末尾改行を取り除いた文字列。
                 let n = 4096u64;
@@ -853,38 +953,57 @@ impl<'ctx> CodeGen<'ctx> {
                 (v, self.fn_rets[name])
             }
             ExprKind::Array(elems) => {
-                // ヒープに [長さ i64][8byteスロット×N] を確保する
+                // 配列は二重間接: 値はヘッダ {len i64, cap i64, data ptr} を指す。
+                // data は cap 個の 8byte スロットを持つ別ブロック（push が realloc で伸ばす）。
+                // ヘッダのポインタは不変なので、push 後もエイリアスは新しい data を見られる。
                 let i64t = self.ctx.i64_type();
                 let n = elems.len() as u64;
-                let size = i64t.const_int(8 * (n + 1), false);
                 let alloc = self.module.get_function("lumo_alloc").unwrap();
-                let buf = self
+                let hdr = self
                     .builder
-                    .build_call(alloc, &[size.into()], "arr")
+                    .build_call(alloc, &[i64t.const_int(24, false).into()], "arr.hdr")
                     .unwrap()
                     .try_as_basic_value()
                     .unwrap_basic()
                     .into_pointer_value();
-                // 先頭に長さを格納
+                // data ブロックを確保（空配列なら null）
+                let data = if n == 0 {
+                    self.ctx.ptr_type(AddressSpace::default()).const_null()
+                } else {
+                    self.builder
+                        .build_call(alloc, &[i64t.const_int(8 * n, false).into()], "arr.data")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .unwrap_basic()
+                        .into_pointer_value()
+                };
+                // ヘッダに len / cap / data を書き込む（生成直後は len==cap==n）
                 self.builder
-                    .build_store(buf, i64t.const_int(n, false))
+                    .build_store(hdr, i64t.const_int(n, false))
                     .unwrap();
-                // 各要素を 8 + 8*i バイト目へ
+                self.builder
+                    .build_store(self.hdr_field(hdr, 8), i64t.const_int(n, false))
+                    .unwrap();
+                self.builder
+                    .build_store(self.hdr_field(hdr, 16), data)
+                    .unwrap();
+                // 各要素を data の 8*i バイト目へ
                 let mut elem_type = Type::Int;
                 for (i, el) in elems.iter().enumerate() {
                     let (val, ty) = self.gen_expr(el);
                     if i == 0 {
                         elem_type = ty;
                     }
-                    let off = i64t.const_int(8 + 8 * (i as u64), false);
+                    let off = i64t.const_int(8 * (i as u64), false);
                     let addr = unsafe {
                         self.builder
-                            .build_in_bounds_gep(self.ctx.i8_type(), buf, &[off], "slot")
+                            .build_in_bounds_gep(self.ctx.i8_type(), data, &[off], "slot")
                             .unwrap()
                     };
                     self.builder.build_store(addr, val).unwrap();
                 }
-                (buf.into(), Type::Array(elem_type.as_elem().unwrap()))
+                // 空配列の要素型は注釈から決まる（typeck が保証）。ここでは Int を仮置き。
+                (hdr.into(), Type::Array(elem_type.as_elem().unwrap()))
             }
             ExprKind::Index { array, index } => {
                 let (arr, arr_ty) = self.gen_expr(array);
@@ -1199,14 +1318,25 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.position_at_end(ok_bb);
     }
 
+    /// 配列ヘッダ `{len@0, cap@8, data@16}` の `byte_off` バイト目のフィールドアドレス。
+    fn hdr_field(&self, hdr: PointerValue<'ctx>, byte_off: u64) -> PointerValue<'ctx> {
+        let off = self.ctx.i64_type().const_int(byte_off, false);
+        unsafe {
+            self.builder
+                .build_in_bounds_gep(self.ctx.i8_type(), hdr, &[off], "hdr.f")
+                .unwrap()
+        }
+    }
+
     fn elem_addr(&mut self, base: PointerValue<'ctx>, index: &Expr) -> PointerValue<'ctx> {
         let i64t = self.ctx.i64_type();
-        // 配列が null でないことを先に確認する
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        // 配列(ヘッダ)が null でないことを先に確認する
         self.null_check(base);
         let (idx, _) = self.gen_expr(index);
         let idx = idx.into_int_value();
 
-        // 長さはブロック先頭の i64。境界チェックする。
+        // 長さはヘッダ先頭の i64。境界チェックする。
         let len = self
             .builder
             .build_load(i64t, base, "len")
@@ -1214,12 +1344,17 @@ impl<'ctx> CodeGen<'ctx> {
             .into_int_value();
         self.bounds_check(idx, len);
 
+        // data ポインタ（ヘッダ +16）を読み、その 8*idx バイト目を指す
+        let data = self
+            .builder
+            .build_load(ptr, self.hdr_field(base, 16), "data")
+            .unwrap()
+            .into_pointer_value();
         let eight = i64t.const_int(8, false);
-        let scaled = self.builder.build_int_mul(idx, eight, "off.mul").unwrap();
-        let off = self.builder.build_int_add(scaled, eight, "off").unwrap();
+        let off = self.builder.build_int_mul(idx, eight, "off").unwrap();
         unsafe {
             self.builder
-                .build_in_bounds_gep(self.ctx.i8_type(), base, &[off], "slot")
+                .build_in_bounds_gep(self.ctx.i8_type(), data, &[off], "slot")
                 .unwrap()
         }
     }

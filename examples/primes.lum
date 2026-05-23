@@ -1,0 +1,40 @@
+# Collect every prime below a limit into a growable array, then print them.
+# We don't know how many primes there are up front, so we start from an empty
+# array (`[]`) and `push` each one as we find it.
+
+fn is_prime(n: int) -> bool {
+    if (n < 2) {
+        return false;
+    }
+    let d = 2;
+    while (d * d <= n) {
+        if (n % d == 0) {
+            return false;
+        }
+        d = d + 1;
+    }
+    return true;
+}
+
+fn main() {
+    let limit = 50;
+    let primes: [int] = [];
+    let n = 2;
+    while (n < limit) {
+        if (is_prime(n)) {
+            primes = push(primes, n);
+        }
+        n = n + 1;
+    }
+
+    print len(primes);          # how many primes below 50
+
+    let line = "";
+    let i = 0;
+    while (i < len(primes)) {
+        line = line + str(primes[i]) + " ";
+        i = i + 1;
+    }
+    print line;
+    return 0;
+}

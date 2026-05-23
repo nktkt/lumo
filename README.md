@@ -54,18 +54,18 @@ cargo run -- emit-ir -O2 examples/fib.lum
 cargo run -- build -O2 examples/fib.lum
 ```
 
-## Language (v0.21, in progress)
+## Language (v0.22, in progress)
 
 See **[docs/language.md](docs/language.md)** for the full reference, or
 **[docs/tutorial.md](docs/tutorial.md)** for a gentle introduction. In brief:
 
 - Types: `int` (64-bit), `bool`, `float` (64-bit), `string`, arrays `[T]`, and user-defined `struct`s — no implicit conversions
-- Literals: `42`, `true` / `false`, `3.14`, `"text"`, `[1, 2, 3]`, `Point { x: 1, y: 2 }`, `null`
+- Literals: `42`, `true` / `false`, `3.14`, `"text"`, `[1, 2, 3]`, `[]` (empty, with a type annotation), `Point { x: 1, y: 2 }`, `null`
 - Strings: `+` concatenates (heap-allocated), `== != < <= > >=` compare (lexicographic, so they sort), `s[i]` reads a byte (bounds-checked)
-- Arrays: `a[i]` read/write (bounds-checked), `len(a)`; elements can be scalars or structs (`[Point]`)
+- Arrays: `a[i]` read/write (bounds-checked), `len(a)`, **growable** with `push(a, x)`; elements can be scalars or structs (`[Point]`)
 - Structs: `struct Point { x: int, y: int }`, field access `p.x` (read/write), nestable
 - `null` for reference types (string/array/struct) → recursive data structures (linked lists, trees); null deref is caught at runtime
-- Built-ins: `int(x)` / `float(x)` conversions, `len(x)`, `str(x)` (stringify), `chr(b)` (byte → 1-char string), `read_line()` (stdin → string / `null` at EOF)
+- Built-ins: `int(x)` / `float(x)` conversions, `len(x)`, `push(a, x)` (append), `str(x)` (stringify), `chr(b)` (byte → 1-char string), `read_line()` (stdin → string / `null` at EOF)
 - Runtime safety: array/string bounds checks, null-dereference checks, integer division-by-zero checks
 - Variables are lexically block-scoped, with shadowing; optional type annotations (`let x: T = ...`)
 - Arithmetic: `+ - * /` on two ints or two floats, `%` (int only), unary minus `-x`
