@@ -6,11 +6,48 @@
 //! (exact stdout). Error cases assert a non-zero exit and that stderr mentions
 //! the expected `Exxxx` diagnostic code.
 
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 /// Path to the `lumo` binary built by Cargo for this test run.
 fn lumo() -> &'static str {
     env!("CARGO_BIN_EXE_lumo")
+}
+
+/// Run a case with `stdin` piped in, and compare stdout to the golden file.
+fn run_ok_stdin(name: &str, stdin_data: &str) {
+    let lum = format!("tests/cases/{}.lum", name);
+    let out = format!("tests/cases/{}.out", name);
+    let expected = std::fs::read_to_string(&out)
+        .unwrap_or_else(|_| panic!("expected output file missing: {}", out));
+
+    let mut child = Command::new(lumo())
+        .args(["run", &lum])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn lumo");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin_data.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().expect("failed to wait for lumo");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "case `{}` exited with failure\nstderr:\n{}",
+        name,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        stdout, expected,
+        "case `{}`: stdout did not match golden file",
+        name
+    );
 }
 
 fn run_ok(name: &str) {
@@ -178,6 +215,12 @@ fn string_index() {
 #[test]
 fn chr_builtin() {
     run_ok("chr");
+}
+
+#[test]
+fn read_line_stdin() {
+    // 4 numbers, one per line; expect count=4 then sum=65
+    run_ok_stdin("read_line", "10\n20\n30\n5\n");
 }
 
 /// `-O2` must promote stack slots to SSA registers (mem2reg): the unoptimized

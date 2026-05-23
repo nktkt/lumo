@@ -487,6 +487,19 @@ impl FnChecker<'_> {
                     return Ok(Type::Int);
                 }
 
+                // 組み込み read_line(): stdin から1行読む。EOF では null。型は string。
+                if name == "read_line" {
+                    if !args.is_empty() {
+                        return Err(Diagnostic::error(format!(
+                            "read_line() は引数を取りませんが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    return Ok(Type::Str);
+                }
+
                 // 組み込み chr(): バイト値(int)を1文字の文字列にする
                 if name == "chr" {
                     if args.len() != 1 {
@@ -680,7 +693,7 @@ fn expect(want: Type, got: Type, span: Span) -> Result<(), Diagnostic> {
 fn is_reserved_name(name: &str) -> bool {
     matches!(
         name,
-        "int" | "float" | "bool" | "string" | "len" | "str" | "chr"
+        "int" | "float" | "bool" | "string" | "len" | "str" | "chr" | "read_line"
     )
 }
 

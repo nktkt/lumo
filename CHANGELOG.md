@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.20.0]
+
+### Added
+
+- `read_line()` built-in: reads a line from standard input, returning a `string` (trailing newline stripped) or `null` at end of input — enabling programs that process real input.
+- `docs/cookbook.md`: task-oriented recipes.
+
 ## [0.18.1]
 
 ### Fixed
