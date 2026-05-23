@@ -1,0 +1,60 @@
+# Parse "name,score" lines from standard input, total each name's score, and
+# print a leaderboard. Shows the text toolkit (split, join) working with maps,
+# read_line, and for-in — the bread and butter of small data-wrangling scripts.
+#
+#   printf 'ann,10\nbob,7\nann,5\n' | lumo run examples/csv.lum
+#   -> ann = 15 / bob = 7  (then "fields: ann | bob")
+
+# parse a non-negative integer from a string (stops at the first non-digit).
+# (Lumo's int() converts float->int; it does not parse strings.)
+fn parse_int(s: string) -> int {
+    let n = 0;
+    for (let i = 0; i < len(s); i = i + 1) {
+        let c = s[i];
+        if (c < 48 || c > 57) {
+            return n;
+        }
+        n = n * 10 + (c - 48);
+    }
+    return n;
+}
+
+fn main() {
+    let totals: {string: int} = {};
+
+    let line = read_line();
+    while (line != null) {
+        let cols = split(line, ",");
+        if (len(cols) == 2) {
+            let name = cols[0];
+            let score = parse_int(cols[1]);
+            if (has(totals, name)) {
+                totals[name] = totals[name] + score;
+            } else {
+                totals[name] = score;
+            }
+        }
+        line = read_line();
+    }
+
+    # sort the names for stable output
+    let names = keys(totals);
+    let i = 1;
+    while (i < len(names)) {
+        let key = names[i];
+        let j = i - 1;
+        while (j >= 0 && names[j] > key) {
+            names[j + 1] = names[j];
+            j = j - 1;
+        }
+        names[j + 1] = key;
+        i = i + 1;
+    }
+
+    for (name in names) {
+        print name + " = " + str(totals[name]);
+    }
+    # join shows the inverse of split: rebuild a delimited line
+    print "fields: " + join(names, " | ");
+    return 0;
+}

@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.26.0]
+
+### Added
+
+- **String toolkit** — the start of a strings standard library:
+  - `substr(s, start, count)` → the substring of `count` bytes from `start` (aborts if out of range).
+  - `split(s, sep)` → `[string]`, splitting on a separator (consecutive/edge separators yield empty pieces; an empty separator returns `[s]`).
+  - `join(parts, sep)` → `string`, the inverse of `split`, concatenating a `[string]` with `sep` between elements.
+- `examples/csv.lum`: a stdin "name,score" leaderboard (split/join + maps + `for`-`in`).
+
+### Notes
+
+- These compose with arrays, maps, and `for`-`in` for real text processing. Parsing a string to a number still needs a hand-written helper (`int()` only converts `float`→`int`); a string→number built-in may come later.
+
 ## [0.25.0]
 
 ### Added

@@ -1,0 +1,40 @@
+# String toolkit: substr, split, join.
+
+fn main() {
+    # substr(s, start, count)
+    print substr("hello world", 0, 5);   # hello
+    print substr("hello world", 6, 5);   # world
+    print "[" + substr("hello", 5, 0) + "]";   # []  (empty, start == len)
+
+    # split basic
+    let a = split("a,b,c", ",");
+    print len(a);                        # 3
+    print a[0] + "|" + a[1] + "|" + a[2];
+
+    # split: consecutive and edge separators yield empty pieces
+    let b = split(",a,,b,", ",");
+    print len(b);                        # 5
+    print "[" + b[0] + "][" + b[2] + "][" + b[4] + "]";   # [][][]
+
+    # split: separator absent -> one piece; multi-char separator
+    print len(split("abc", ","));        # 1
+    print split("a::b::c", "::")[1];     # b
+
+    # join (the inverse of split)
+    print join(["a", "b", "c"], ", ");   # a, b, c
+    print join(["solo"], "-");           # solo
+    let empty: [string] = [];
+    print "[" + join(empty, ",") + "]";  # []
+
+    # round trip
+    print join(split("x-y-z", "-"), "+");   # x+y+z
+
+    # interop: split + for-in + map (word lengths)
+    let lens: {string: int} = {};
+    for (w in split("the quick brown the", " ")) {
+        lens[w] = len(w);
+    }
+    print lens["quick"];                 # 5
+    print len(lens);                     # 3
+    return 0;
+}

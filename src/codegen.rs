@@ -192,6 +192,12 @@ impl<'ctx> CodeGen<'ctx> {
         );
         self.module
             .add_function("strlen", i64t.fn_type(&[ptr.into()], false), ext);
+        // void* memcpy(void* dst, void* src, size_t n) — substr/split/join に使う
+        self.module.add_function(
+            "memcpy",
+            ptr.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false),
+            ext,
+        );
         self.module
             .add_function("strcpy", ptr.fn_type(&[ptr.into(), ptr.into()], false), ext);
         self.module
@@ -291,6 +297,695 @@ impl<'ctx> CodeGen<'ctx> {
 
         // map(連想配列)のランタイム。lumo_alloc/lumo_panic を使うのでこの後に定義する。
         self.declare_map_runtime();
+        // 文字列ツールキット（substr/split/join）のランタイム。
+        self.declare_string_runtime();
+    }
+
+    /// 文字列ツールキットのランタイム（substr/split/join）を IR で定義する。
+    ///
+    /// 文字列は NUL 終端のヒープ確保バイト列。split は結果を [string] 配列
+    /// （v0.22 のレイアウト {len,cap,data}）で返し、join はその逆。
+    fn declare_string_runtime(&mut self) {
+        let i64t = self.ctx.i64_type();
+        let i1t = self.ctx.bool_type();
+        let i8t = self.ctx.i8_type();
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+
+        // --- ptr lumo_substr(ptr s, i64 start, i64 n): s[start..start+n] の新規文字列 ---
+        // 呼び出し側が start/n の範囲を保証する。
+        let substr_fn = self.module.add_function(
+            "lumo_substr",
+            ptr.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(substr_fn, "entry");
+            self.builder.position_at_end(entry);
+            let s = substr_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let start = substr_fn.get_nth_param(1).unwrap().into_int_value();
+            let n = substr_fn.get_nth_param(2).unwrap().into_int_value();
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let size = self
+                .builder
+                .build_int_add(n, i64t.const_int(1, false), "size")
+                .unwrap();
+            let buf = self
+                .builder
+                .build_call(alloc, &[size.into()], "buf")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let src = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, s, &[start], "src")
+                    .unwrap()
+            };
+            let memcpy = self.module.get_function("memcpy").unwrap();
+            self.builder
+                .build_call(memcpy, &[buf.into(), src.into(), n.into()], "")
+                .unwrap();
+            // NUL 終端
+            let end = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[n], "end")
+                    .unwrap()
+            };
+            self.builder.build_store(end, i8t.const_zero()).unwrap();
+            self.builder.build_return(Some(&buf)).unwrap();
+        }
+
+        // --- i1 lumo_str_eq_at(ptr s, i64 i, ptr sep, i64 m): s[i..i+m]==sep[0..m] ---
+        let eqat_fn = self.module.add_function(
+            "lumo_str_eq_at",
+            i1t.fn_type(&[ptr.into(), i64t.into(), ptr.into(), i64t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(eqat_fn, "entry");
+            let loop_bb = self.ctx.append_basic_block(eqat_fn, "loop");
+            let body_bb = self.ctx.append_basic_block(eqat_fn, "body");
+            let neq_bb = self.ctx.append_basic_block(eqat_fn, "neq");
+            let yes_bb = self.ctx.append_basic_block(eqat_fn, "yes");
+            let s = eqat_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let i0 = eqat_fn.get_nth_param(1).unwrap().into_int_value();
+            let sep = eqat_fn.get_nth_param(2).unwrap().into_pointer_value();
+            let m = eqat_fn.get_nth_param(3).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let j_ptr = self.builder.build_alloca(i64t, "j").unwrap();
+            self.builder.build_store(j_ptr, i64t.const_zero()).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // loop: if j>=m -> yes
+            self.builder.position_at_end(loop_bb);
+            let jv = self
+                .builder
+                .build_load(i64t, j_ptr, "j")
+                .unwrap()
+                .into_int_value();
+            let done = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, jv, m, "done")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(done, yes_bb, body_bb)
+                .unwrap();
+            // body: a=s[i+j]; b=sep[j]; if a!=b -> neq
+            self.builder.position_at_end(body_bb);
+            let ij = self.builder.build_int_add(i0, jv, "ij").unwrap();
+            let sa = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, s, &[ij], "sa")
+                    .unwrap()
+            };
+            let a = self
+                .builder
+                .build_load(i8t, sa, "a")
+                .unwrap()
+                .into_int_value();
+            let sb = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, sep, &[jv], "sb")
+                    .unwrap()
+            };
+            let b = self
+                .builder
+                .build_load(i8t, sb, "b")
+                .unwrap()
+                .into_int_value();
+            let eq = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, a, b, "eq")
+                .unwrap();
+            let cont_bb = self.ctx.append_basic_block(eqat_fn, "cont");
+            self.builder
+                .build_conditional_branch(eq, cont_bb, neq_bb)
+                .unwrap();
+            self.builder.position_at_end(cont_bb);
+            let j1 = self
+                .builder
+                .build_int_add(jv, i64t.const_int(1, false), "j1")
+                .unwrap();
+            self.builder.build_store(j_ptr, j1).unwrap();
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            self.builder.position_at_end(neq_bb);
+            self.builder.build_return(Some(&i1t.const_zero())).unwrap();
+            self.builder.position_at_end(yes_bb);
+            self.builder
+                .build_return(Some(&i1t.const_int(1, false)))
+                .unwrap();
+        }
+
+        // --- ptr lumo_split(ptr s, ptr sep): [string] を返す ---
+        // sep が空なら [s]。それ以外は非重複でsepを境に分割（連続/端のsepは空文字列を生む）。
+        let split_fn = self.module.add_function(
+            "lumo_split",
+            ptr.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(split_fn, "entry");
+            let s = split_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let sep = split_fn.get_nth_param(1).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let n = self
+                .builder
+                .build_call(strlen, &[s.into()], "n")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let m = self
+                .builder
+                .build_call(strlen, &[sep.into()], "m")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            // sep が空なら [s] を返す
+            let sep_empty = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, m, i64t.const_zero(), "sepempty")
+                .unwrap();
+            let one_bb = self.ctx.append_basic_block(split_fn, "single");
+            let multi_bb = self.ctx.append_basic_block(split_fn, "multi");
+            self.builder
+                .build_conditional_branch(sep_empty, one_bb, multi_bb)
+                .unwrap();
+            // single: 配列[ s ]
+            self.builder.position_at_end(one_bb);
+            let arr1 = self
+                .builder
+                .build_call(alloc, &[i64t.const_int(24, false).into()], "arr1")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder
+                .build_store(arr1, i64t.const_int(1, false))
+                .unwrap();
+            self.builder
+                .build_store(self.hdr_field(arr1, 8), i64t.const_int(1, false))
+                .unwrap();
+            let d1 = self
+                .builder
+                .build_call(alloc, &[i64t.const_int(8, false).into()], "d1")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder.build_store(d1, s).unwrap();
+            self.builder
+                .build_store(self.hdr_field(arr1, 16), d1)
+                .unwrap();
+            self.builder.build_return(Some(&arr1)).unwrap();
+            // multi: 2パス（数える→詰める）
+            self.builder.position_at_end(multi_bb);
+            // pass1: count separators
+            let cnt_ptr = self.builder.build_alloca(i64t, "cnt").unwrap();
+            let i_ptr = self.builder.build_alloca(i64t, "i").unwrap();
+            self.builder
+                .build_store(cnt_ptr, i64t.const_zero())
+                .unwrap();
+            self.builder.build_store(i_ptr, i64t.const_zero()).unwrap();
+            let p1 = self.ctx.append_basic_block(split_fn, "p1");
+            let p1b = self.ctx.append_basic_block(split_fn, "p1b");
+            let p1m = self.ctx.append_basic_block(split_fn, "p1match");
+            let p1n = self.ctx.append_basic_block(split_fn, "p1next");
+            let p1done = self.ctx.append_basic_block(split_fn, "p1done");
+            self.builder.build_unconditional_branch(p1).unwrap();
+            // p1: while i+m <= n
+            self.builder.position_at_end(p1);
+            let iv = self
+                .builder
+                .build_load(i64t, i_ptr, "i")
+                .unwrap()
+                .into_int_value();
+            let im = self.builder.build_int_add(iv, m, "im").unwrap();
+            let in_range = self
+                .builder
+                .build_int_compare(IntPredicate::ULE, im, n, "inr")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(in_range, p1b, p1done)
+                .unwrap();
+            // p1b: if eq_at -> match else i++
+            self.builder.position_at_end(p1b);
+            let eq = self
+                .builder
+                .build_call(eqat_fn, &[s.into(), iv.into(), sep.into(), m.into()], "eq")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            self.builder.build_conditional_branch(eq, p1m, p1n).unwrap();
+            // p1match: cnt++; i+=m
+            self.builder.position_at_end(p1m);
+            let c = self
+                .builder
+                .build_load(i64t, cnt_ptr, "c")
+                .unwrap()
+                .into_int_value();
+            let c1 = self
+                .builder
+                .build_int_add(c, i64t.const_int(1, false), "c1")
+                .unwrap();
+            self.builder.build_store(cnt_ptr, c1).unwrap();
+            self.builder.build_store(i_ptr, im).unwrap();
+            self.builder.build_unconditional_branch(p1).unwrap();
+            // p1next: i++
+            self.builder.position_at_end(p1n);
+            let i1 = self
+                .builder
+                .build_int_add(iv, i64t.const_int(1, false), "i1")
+                .unwrap();
+            self.builder.build_store(i_ptr, i1).unwrap();
+            self.builder.build_unconditional_branch(p1).unwrap();
+            // p1done: pieces = cnt+1; alloc array
+            self.builder.position_at_end(p1done);
+            let cnt = self
+                .builder
+                .build_load(i64t, cnt_ptr, "cnt")
+                .unwrap()
+                .into_int_value();
+            let pieces = self
+                .builder
+                .build_int_add(cnt, i64t.const_int(1, false), "pieces")
+                .unwrap();
+            let arr = self
+                .builder
+                .build_call(alloc, &[i64t.const_int(24, false).into()], "arr")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder.build_store(arr, pieces).unwrap();
+            self.builder
+                .build_store(self.hdr_field(arr, 8), pieces)
+                .unwrap();
+            let dbytes = self
+                .builder
+                .build_int_mul(pieces, i64t.const_int(8, false), "dbytes")
+                .unwrap();
+            let data = self
+                .builder
+                .build_call(alloc, &[dbytes.into()], "data")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            self.builder
+                .build_store(self.hdr_field(arr, 16), data)
+                .unwrap();
+            // pass2: extract pieces. start=0, i=0, w=0
+            let start_ptr = self.builder.build_alloca(i64t, "start").unwrap();
+            let w_ptr = self.builder.build_alloca(i64t, "w").unwrap();
+            self.builder
+                .build_store(start_ptr, i64t.const_zero())
+                .unwrap();
+            self.builder.build_store(i_ptr, i64t.const_zero()).unwrap();
+            self.builder.build_store(w_ptr, i64t.const_zero()).unwrap();
+            let p2 = self.ctx.append_basic_block(split_fn, "p2");
+            let p2b = self.ctx.append_basic_block(split_fn, "p2b");
+            let p2m = self.ctx.append_basic_block(split_fn, "p2match");
+            let p2n = self.ctx.append_basic_block(split_fn, "p2next");
+            let p2done = self.ctx.append_basic_block(split_fn, "p2done");
+            self.builder.build_unconditional_branch(p2).unwrap();
+            self.builder.position_at_end(p2);
+            let iv2 = self
+                .builder
+                .build_load(i64t, i_ptr, "i")
+                .unwrap()
+                .into_int_value();
+            let im2 = self.builder.build_int_add(iv2, m, "im2").unwrap();
+            let inr2 = self
+                .builder
+                .build_int_compare(IntPredicate::ULE, im2, n, "inr2")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(inr2, p2b, p2done)
+                .unwrap();
+            self.builder.position_at_end(p2b);
+            let eq2 = self
+                .builder
+                .build_call(
+                    eqat_fn,
+                    &[s.into(), iv2.into(), sep.into(), m.into()],
+                    "eq2",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            self.builder
+                .build_conditional_branch(eq2, p2m, p2n)
+                .unwrap();
+            // p2match: piece = substr(s, start, i-start); store; i+=m; start=i
+            self.builder.position_at_end(p2m);
+            let st = self
+                .builder
+                .build_load(i64t, start_ptr, "st")
+                .unwrap()
+                .into_int_value();
+            let plen = self.builder.build_int_sub(iv2, st, "plen").unwrap();
+            let piece = self
+                .builder
+                .build_call(substr_fn, &[s.into(), st.into(), plen.into()], "piece")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let wv = self
+                .builder
+                .build_load(i64t, w_ptr, "w")
+                .unwrap()
+                .into_int_value();
+            let woff = self
+                .builder
+                .build_int_mul(wv, i64t.const_int(8, false), "woff")
+                .unwrap();
+            let waddr = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, data, &[woff], "waddr")
+                    .unwrap()
+            };
+            self.builder.build_store(waddr, piece).unwrap();
+            self.builder
+                .build_store(
+                    w_ptr,
+                    self.builder
+                        .build_int_add(wv, i64t.const_int(1, false), "w1")
+                        .unwrap(),
+                )
+                .unwrap();
+            self.builder.build_store(i_ptr, im2).unwrap();
+            self.builder.build_store(start_ptr, im2).unwrap();
+            self.builder.build_unconditional_branch(p2).unwrap();
+            // p2next: i++
+            self.builder.position_at_end(p2n);
+            let i1b = self
+                .builder
+                .build_int_add(iv2, i64t.const_int(1, false), "i1b")
+                .unwrap();
+            self.builder.build_store(i_ptr, i1b).unwrap();
+            self.builder.build_unconditional_branch(p2).unwrap();
+            // p2done: last piece = substr(s, start, n-start)
+            self.builder.position_at_end(p2done);
+            let st2 = self
+                .builder
+                .build_load(i64t, start_ptr, "st2")
+                .unwrap()
+                .into_int_value();
+            let lastlen = self.builder.build_int_sub(n, st2, "lastlen").unwrap();
+            let last = self
+                .builder
+                .build_call(substr_fn, &[s.into(), st2.into(), lastlen.into()], "last")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let wv2 = self
+                .builder
+                .build_load(i64t, w_ptr, "w2")
+                .unwrap()
+                .into_int_value();
+            let woff2 = self
+                .builder
+                .build_int_mul(wv2, i64t.const_int(8, false), "woff2")
+                .unwrap();
+            let waddr2 = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, data, &[woff2], "waddr2")
+                    .unwrap()
+            };
+            self.builder.build_store(waddr2, last).unwrap();
+            self.builder.build_return(Some(&arr)).unwrap();
+        }
+
+        // --- ptr lumo_join(ptr arr, ptr sep): [string] を sep で連結した文字列 ---
+        let join_fn = self.module.add_function(
+            "lumo_join",
+            ptr.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(join_fn, "entry");
+            let arr = join_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let sep = join_fn.get_nth_param(1).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
+            let strlen = self.module.get_function("strlen").unwrap();
+            let memcpy = self.module.get_function("memcpy").unwrap();
+            let cnt = self
+                .builder
+                .build_load(i64t, arr, "cnt")
+                .unwrap()
+                .into_int_value();
+            let data = self
+                .builder
+                .build_load(ptr, self.hdr_field(arr, 16), "data")
+                .unwrap()
+                .into_pointer_value();
+            let m = self
+                .builder
+                .build_call(strlen, &[sep.into()], "m")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            // total = sum(strlen(piece)) + m*(cnt-1)（cnt==0 のときは別扱い）
+            // pass1
+            let total_ptr = self.builder.build_alloca(i64t, "total").unwrap();
+            let k_ptr = self.builder.build_alloca(i64t, "k").unwrap();
+            self.builder
+                .build_store(total_ptr, i64t.const_zero())
+                .unwrap();
+            self.builder.build_store(k_ptr, i64t.const_zero()).unwrap();
+            let s1 = self.ctx.append_basic_block(join_fn, "s1");
+            let s1b = self.ctx.append_basic_block(join_fn, "s1b");
+            let s1d = self.ctx.append_basic_block(join_fn, "s1d");
+            self.builder.build_unconditional_branch(s1).unwrap();
+            self.builder.position_at_end(s1);
+            let kv = self
+                .builder
+                .build_load(i64t, k_ptr, "k")
+                .unwrap()
+                .into_int_value();
+            let kdone = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, kv, cnt, "kdone")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(kdone, s1d, s1b)
+                .unwrap();
+            self.builder.position_at_end(s1b);
+            let koff = self
+                .builder
+                .build_int_mul(kv, i64t.const_int(8, false), "koff")
+                .unwrap();
+            let kaddr = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, data, &[koff], "kaddr")
+                    .unwrap()
+            };
+            let piece = self
+                .builder
+                .build_load(ptr, kaddr, "piece")
+                .unwrap()
+                .into_pointer_value();
+            let pl = self
+                .builder
+                .build_call(strlen, &[piece.into()], "pl")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let tv = self
+                .builder
+                .build_load(i64t, total_ptr, "t")
+                .unwrap()
+                .into_int_value();
+            self.builder
+                .build_store(total_ptr, self.builder.build_int_add(tv, pl, "t1").unwrap())
+                .unwrap();
+            self.builder
+                .build_store(
+                    k_ptr,
+                    self.builder
+                        .build_int_add(kv, i64t.const_int(1, false), "k1")
+                        .unwrap(),
+                )
+                .unwrap();
+            self.builder.build_unconditional_branch(s1).unwrap();
+            // s1d: add separators総量 m*(cnt-1)（cnt>0 のとき）。cnt==0 は (cnt-1) が巨大化するので分岐。
+            self.builder.position_at_end(s1d);
+            let has_any = self
+                .builder
+                .build_int_compare(IntPredicate::UGT, cnt, i64t.const_zero(), "hasany")
+                .unwrap();
+            let seps_bb = self.ctx.append_basic_block(join_fn, "seps");
+            let alloc_bb = self.ctx.append_basic_block(join_fn, "alloc");
+            self.builder
+                .build_conditional_branch(has_any, seps_bb, alloc_bb)
+                .unwrap();
+            self.builder.position_at_end(seps_bb);
+            let cm1 = self
+                .builder
+                .build_int_sub(cnt, i64t.const_int(1, false), "cm1")
+                .unwrap();
+            let sepsum = self.builder.build_int_mul(m, cm1, "sepsum").unwrap();
+            let tv2 = self
+                .builder
+                .build_load(i64t, total_ptr, "t2")
+                .unwrap()
+                .into_int_value();
+            self.builder
+                .build_store(
+                    total_ptr,
+                    self.builder.build_int_add(tv2, sepsum, "t3").unwrap(),
+                )
+                .unwrap();
+            self.builder.build_unconditional_branch(alloc_bb).unwrap();
+            // alloc: buf = lumo_alloc(total+1)
+            self.builder.position_at_end(alloc_bb);
+            let total = self
+                .builder
+                .build_load(i64t, total_ptr, "total")
+                .unwrap()
+                .into_int_value();
+            let bufsize = self
+                .builder
+                .build_int_add(total, i64t.const_int(1, false), "bufsize")
+                .unwrap();
+            let buf = self
+                .builder
+                .build_call(alloc, &[bufsize.into()], "buf")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            // pass2: copy pieces with separators; pos tracked
+            let pos_ptr = self.builder.build_alloca(i64t, "pos").unwrap();
+            self.builder
+                .build_store(pos_ptr, i64t.const_zero())
+                .unwrap();
+            self.builder.build_store(k_ptr, i64t.const_zero()).unwrap();
+            let s2 = self.ctx.append_basic_block(join_fn, "s2");
+            let s2b = self.ctx.append_basic_block(join_fn, "s2b");
+            let s2sep = self.ctx.append_basic_block(join_fn, "s2sep");
+            let s2cp = self.ctx.append_basic_block(join_fn, "s2cp");
+            let s2d = self.ctx.append_basic_block(join_fn, "s2d");
+            self.builder.build_unconditional_branch(s2).unwrap();
+            self.builder.position_at_end(s2);
+            let kv2 = self
+                .builder
+                .build_load(i64t, k_ptr, "k")
+                .unwrap()
+                .into_int_value();
+            let kdone2 = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, kv2, cnt, "kdone2")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(kdone2, s2d, s2b)
+                .unwrap();
+            // s2b: if k>0 prepend sep
+            self.builder.position_at_end(s2b);
+            let kpos = self
+                .builder
+                .build_int_compare(IntPredicate::UGT, kv2, i64t.const_zero(), "kpos")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(kpos, s2sep, s2cp)
+                .unwrap();
+            self.builder.position_at_end(s2sep);
+            let posv = self
+                .builder
+                .build_load(i64t, pos_ptr, "pos")
+                .unwrap()
+                .into_int_value();
+            let dst = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[posv], "dst")
+                    .unwrap()
+            };
+            self.builder
+                .build_call(memcpy, &[dst.into(), sep.into(), m.into()], "")
+                .unwrap();
+            self.builder
+                .build_store(
+                    pos_ptr,
+                    self.builder.build_int_add(posv, m, "pos1").unwrap(),
+                )
+                .unwrap();
+            self.builder.build_unconditional_branch(s2cp).unwrap();
+            // s2cp: copy piece
+            self.builder.position_at_end(s2cp);
+            let koff2 = self
+                .builder
+                .build_int_mul(kv2, i64t.const_int(8, false), "koff2")
+                .unwrap();
+            let kaddr2 = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, data, &[koff2], "kaddr2")
+                    .unwrap()
+            };
+            let piece2 = self
+                .builder
+                .build_load(ptr, kaddr2, "piece2")
+                .unwrap()
+                .into_pointer_value();
+            let pl2 = self
+                .builder
+                .build_call(strlen, &[piece2.into()], "pl2")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let posv2 = self
+                .builder
+                .build_load(i64t, pos_ptr, "pos2")
+                .unwrap()
+                .into_int_value();
+            let dst2 = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[posv2], "dst2")
+                    .unwrap()
+            };
+            self.builder
+                .build_call(memcpy, &[dst2.into(), piece2.into(), pl2.into()], "")
+                .unwrap();
+            self.builder
+                .build_store(
+                    pos_ptr,
+                    self.builder.build_int_add(posv2, pl2, "pos2b").unwrap(),
+                )
+                .unwrap();
+            self.builder
+                .build_store(
+                    k_ptr,
+                    self.builder
+                        .build_int_add(kv2, i64t.const_int(1, false), "k2")
+                        .unwrap(),
+                )
+                .unwrap();
+            self.builder.build_unconditional_branch(s2).unwrap();
+            // s2d: NUL terminate, return
+            self.builder.position_at_end(s2d);
+            let endpos = self
+                .builder
+                .build_load(i64t, pos_ptr, "endpos")
+                .unwrap()
+                .into_int_value();
+            let bend = unsafe {
+                self.builder
+                    .build_in_bounds_gep(i8t, buf, &[endpos], "bend")
+                    .unwrap()
+            };
+            self.builder.build_store(bend, i8t.const_zero()).unwrap();
+            self.builder.build_return(Some(&buf)).unwrap();
+        }
     }
 
     /// map のランタイム（分離連鎖ハッシュ表、RFC 0002）を IR で定義する。
@@ -1873,6 +2568,83 @@ impl<'ctx> CodeGen<'ctx> {
                     .try_as_basic_value()
                     .unwrap_basic();
                 (arr, Type::Array(crate::types::Elem::Str))
+            }
+            ExprKind::Call { name, args } if name == "substr" => {
+                // substr(s, start, count): 範囲を検査してから lumo_substr を呼ぶ
+                let i64t = self.ctx.i64_type();
+                let (sv, _) = self.gen_expr(&args[0]);
+                let s = sv.into_pointer_value();
+                let (startv, _) = self.gen_expr(&args[1]);
+                let start = startv.into_int_value();
+                let (countv, _) = self.gen_expr(&args[2]);
+                let count = countv.into_int_value();
+                let strlen = self.module.get_function("strlen").unwrap();
+                let len = self
+                    .builder
+                    .build_call(strlen, &[s.into()], "len")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic()
+                    .into_int_value();
+                let zero = i64t.const_zero();
+                let c1 = self
+                    .builder
+                    .build_int_compare(IntPredicate::SGE, start, zero, "c1")
+                    .unwrap();
+                let c2 = self
+                    .builder
+                    .build_int_compare(IntPredicate::SGE, count, zero, "c2")
+                    .unwrap();
+                let sc = self.builder.build_int_add(start, count, "sc").unwrap();
+                let c3 = self
+                    .builder
+                    .build_int_compare(IntPredicate::SLE, sc, len, "c3")
+                    .unwrap();
+                let ok12 = self.builder.build_and(c1, c2, "ok12").unwrap();
+                let ok = self.builder.build_and(ok12, c3, "ok").unwrap();
+                let function = self.cur_function();
+                let fail_bb = self.ctx.append_basic_block(function, "substr.fail");
+                let ok_bb = self.ctx.append_basic_block(function, "substr.ok");
+                self.builder
+                    .build_conditional_branch(ok, ok_bb, fail_bb)
+                    .unwrap();
+                self.builder.position_at_end(fail_bb);
+                self.panic("lumo: substr out of range\n", "substr_oob_msg");
+                self.builder.position_at_end(ok_bb);
+                let f = self.module.get_function("lumo_substr").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[s.into(), start.into(), count.into()], "substr")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Str)
+            }
+            ExprKind::Call { name, args } if name == "split" => {
+                let (sv, _) = self.gen_expr(&args[0]);
+                let (sepv, _) = self.gen_expr(&args[1]);
+                let f = self.module.get_function("lumo_split").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[sv.into(), sepv.into()], "split")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Array(crate::types::Elem::Str))
+            }
+            ExprKind::Call { name, args } if name == "join" => {
+                let (av, _) = self.gen_expr(&args[0]);
+                let arr = av.into_pointer_value();
+                self.null_check(arr);
+                let (sepv, _) = self.gen_expr(&args[1]);
+                let f = self.module.get_function("lumo_join").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[arr.into(), sepv.into()], "join")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Str)
             }
             ExprKind::Call { name, args } if name == "push" => {
                 // push(arr, x): 末尾に x を追加し、配列(ヘッダ)を返す。容量が足りなければ

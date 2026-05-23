@@ -656,6 +656,60 @@ impl FnChecker<'_> {
                     return Ok(Type::Str);
                 }
 
+                // 文字列ツールキット: substr(s, start, count) は (string,int,int) -> string
+                if name == "substr" {
+                    if args.len() != 3 {
+                        return Err(Diagnostic::error(format!(
+                            "substr() は引数3個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Int, self.check_expr(&args[1])?, args[1].span)?;
+                    expect(Type::Int, self.check_expr(&args[2])?, args[2].span)?;
+                    return Ok(Type::Str);
+                }
+
+                // 文字列ツールキット: split(s, sep) は (string,string) -> [string]
+                if name == "split" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "split() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Array(crate::types::Elem::Str));
+                }
+
+                // 文字列ツールキット: join(parts, sep) は ([string],string) -> string
+                if name == "join" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "join() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    let at = self.check_expr(&args[0])?;
+                    if at != Type::Array(crate::types::Elem::Str) {
+                        return Err(Diagnostic::error(format!(
+                            "join() の第1引数は [string] ですが {} が渡されました",
+                            at.name()
+                        ))
+                        .with_code("E0200")
+                        .at(args[0].span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Str);
+                }
+
                 // 数学組み込み: sqrt/floor/ceil は float -> float
                 if matches!(name.as_str(), "sqrt" | "floor" | "ceil") {
                     if args.len() != 1 {
@@ -977,6 +1031,9 @@ fn is_reserved_name(name: &str) -> bool {
             | "has"
             | "keys"
             | "delete"
+            | "substr"
+            | "split"
+            | "join"
     )
 }
 
