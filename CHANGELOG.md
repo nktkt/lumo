@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.31.0]
+
+### Added
+
+- **String `replace` and `repeat`** — completing the string toolkit:
+  - `replace(s, from, to)` → a new string with every occurrence of `from` replaced by `to` (it grows or shrinks as needed; an empty `from` returns `s` unchanged).
+  - `repeat(s, n)` → a new string of `s` concatenated `n` times (`n <= 0` gives `""`).
+- `examples/slug.lum`: a "slugify" routine (`replace` + `trim` + `to_lower`) with a `repeat`-drawn underline.
+
+### Notes
+
+- `replace` is implemented as `join(split(s, from), to)`, reusing the existing (well-tested) `split`/`join` runtime — so it shares their semantics exactly, including empty-`from` handling.
+
 ## [0.30.0]
 
 ### Added

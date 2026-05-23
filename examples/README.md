@@ -61,3 +61,4 @@ Listed from simplest to most advanced:
 | [`save_load.lum`](save_load.lum) | File I/O — `write_file` to persist a `name,score` table to disk, then `read_file` (returning `null` if absent) to load it back, `split` it into records, and report the leader. |
 | [`matrix.lum`](matrix.lum) | Nested collections — `[[int]]` matrices with 2D literals, chained indexing (`m[i][j]`), and growing rows with `push`, driving a full matrix-multiply. |
 | [`tags.lum`](tags.lum) | String methods — `split` a messy tag list, then `trim` + `to_lower` each piece, and answer membership (`==`) and substring (`contains`) queries. |
+| [`slug.lum`](slug.lum) | String rewriting — `replace` to swap spaces/strip punctuation and `repeat` to draw a title underline, building a "slugify" routine with `trim` + `to_lower`. |

@@ -788,6 +788,37 @@ impl FnChecker<'_> {
                     });
                 }
 
+                // 文字列メソッド: replace(s, from, to) -> string（from の全出現を置換）
+                if name == "replace" {
+                    if args.len() != 3 {
+                        return Err(Diagnostic::error(format!(
+                            "replace() は引数3個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    expect(Type::Str, self.check_expr(&args[2])?, args[2].span)?;
+                    return Ok(Type::Str);
+                }
+
+                // 文字列メソッド: repeat(s, n) -> string（s を n 回連結、n<=0 は空文字）
+                if name == "repeat" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "repeat() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Int, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Str);
+                }
+
                 // 数学組み込み: sqrt/floor/ceil は float -> float
                 if matches!(name.as_str(), "sqrt" | "floor" | "ceil") {
                     if args.len() != 1 {
@@ -1119,6 +1150,8 @@ fn is_reserved_name(name: &str) -> bool {
             | "trim"
             | "find"
             | "contains"
+            | "replace"
+            | "repeat"
     )
 }
 
