@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.28.0]
+
+### Added
+
+- **File I/O.** Two built-ins for whole-file persistence:
+  - `write_file(path, content)` writes a `string` to a file, **replacing** any existing contents, and returns a `bool` (`true` on success, `false` if the file could not be opened or the write was short).
+  - `read_file(path)` returns the file's entire contents as a `string`, or `null` if it cannot be opened (guard it like `read_line`).
+- `examples/save_load.lum`: persist a `name,score` table with `write_file`, then `read_file` + `split` it back and report the leader.
+
+### Notes
+
+- Files are read/written as raw bytes via the C library (`fopen`/`fread`/`fwrite`); no text encoding or extra buffering. Pairs naturally with `split`/`join` for line-oriented data.
+
 ## [0.27.0]
 
 ### Added

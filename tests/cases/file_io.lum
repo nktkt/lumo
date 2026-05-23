@@ -1,0 +1,31 @@
+# File I/O: write_file / read_file round-trip, plus the missing-file null case.
+
+fn main() {
+    let path = "/tmp/lumo_test_file_io.txt";
+
+    # write returns true on success
+    let wrote = write_file(path, "line one\nline two\n");
+    print wrote;                       # true
+
+    # read the whole file back as a string
+    let text = read_file(path);
+    print text;                        # line one / line two
+
+    # round-trip survives split() on newlines
+    let lines = split(text, "\n");
+    print len(lines);                  # 3 (trailing "" after final \n)
+    print lines[0];                    # line one
+    print lines[1];                    # line two
+
+    # opening a non-existent file yields null
+    let missing = read_file("/tmp/lumo_no_such_file_98765.txt");
+    if (missing == null) {
+        print "missing is null";
+    }
+
+    # overwrite truncates: second write replaces the first
+    write_file(path, "fresh");
+    print read_file(path);             # fresh
+
+    return 0;
+}
