@@ -1,0 +1,33 @@
+# Ranking scores with sorted / reversed / slicing.
+#
+# sorted(a) returns a new ascending array (the original is untouched); reversed(a)
+# flips one. Composed with slicing, "top 3" is just the first three of the
+# descending order. This is the everyday use of the new array operations.
+#
+#   cargo run -- run examples/leaderboard.lum
+#   ->  ascending: 55,61,72,88,90,95
+#      top 3: 95,90,88
+#      lowest: 55
+
+fn show(xs: [int]) -> string {
+    let r = "";
+    for (let i = 0; i < len(xs); i = i + 1) {
+        if (i > 0) { r = r + ","; }
+        r = r + str(xs[i]);
+    }
+    return r;
+}
+
+fn main() {
+    let scores = [88, 95, 61, 90, 55, 72];
+
+    let asc = sorted(scores);            # new array; `scores` stays as-is
+    print "ascending: " + show(asc);
+
+    # highest first = reverse of the ascending order
+    let desc = reversed(asc);
+    print "top 3: " + show(desc[:3]);    # slice the front of the descending list
+
+    print "lowest: " + str(asc[0]);
+    return 0;
+}

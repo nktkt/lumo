@@ -20,20 +20,7 @@ fn main() {
     }
 
     # keys() order is unspecified, so sort for stable output
-    let ks = keys(counts);
-    let i = 1;
-    while (i < len(ks)) {
-        let key = ks[i];
-        let j = i - 1;
-        while (j >= 0 && ks[j] > key) {
-            ks[j + 1] = ks[j];
-            j = j - 1;
-        }
-        ks[j + 1] = key;
-        i = i + 1;
-    }
-
-    for (word in ks) {
+    for (word in sorted(keys(counts))) {
         print word + ": " + str(counts[word]);
     }
     return 0;
