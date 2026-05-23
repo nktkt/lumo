@@ -365,9 +365,10 @@ print len(counts);          # 2
 let ks = keys(counts);      # ["a", "b"] in some order
 ```
 
-Maps are backed by a separately-chained hash table (FNV-1a hashing). The bucket
-count is currently fixed (no resize yet), and entries — like all heap data — are
-reclaimed only at program exit (RFC 0001).
+Maps are backed by a separately-chained hash table (FNV-1a hashing) that grows
+automatically — when the load factor exceeds 0.75 the bucket array is rehashed
+into one twice as large, so lookups stay near O(1) as the map fills. Entries —
+like all heap data — are reclaimed only at program exit (RFC 0001).
 
 ## Structs
 

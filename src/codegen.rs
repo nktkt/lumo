@@ -528,6 +528,143 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder.build_return(Some(&ptr.const_null())).unwrap();
         }
 
+        // --- void lumo_map_resize(ptr hdr): バケット数を倍にして全エントリを付け替える ---
+        // load factor が閾値を超えたとき put から呼ぶ。エントリ節点は再利用し、
+        // next を繋ぎ替えるだけ（古いバケット配列は解放しない＝他と同様）。
+        let resize_fn = self.module.add_function(
+            "lumo_map_resize",
+            self.ctx.void_type().fn_type(&[ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(resize_fn, "entry");
+            let bloop = self.ctx.append_basic_block(resize_fn, "bloop");
+            let bbody = self.ctx.append_basic_block(resize_fn, "bbody");
+            let cloop = self.ctx.append_basic_block(resize_fn, "cloop");
+            let cbody = self.ctx.append_basic_block(resize_fn, "cbody");
+            let bnext = self.ctx.append_basic_block(resize_fn, "bnext");
+            let finish = self.ctx.append_basic_block(resize_fn, "finish");
+            let hdr = resize_fn.get_nth_param(0).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let old_nb = self
+                .builder
+                .build_load(i64t, self.hdr_field(hdr, 8), "old_nb")
+                .unwrap()
+                .into_int_value();
+            let new_nb = self
+                .builder
+                .build_int_mul(old_nb, i64t.const_int(2, false), "new_nb")
+                .unwrap();
+            let old_buckets = self
+                .builder
+                .build_load(ptr, self.hdr_field(hdr, 16), "old_buckets")
+                .unwrap()
+                .into_pointer_value();
+            let calloc = self.module.get_function("calloc").unwrap();
+            let new_buckets = self
+                .builder
+                .build_call(
+                    calloc,
+                    &[new_nb.into(), i64t.const_int(8, false).into()],
+                    "new_b",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let b_ptr = self.builder.build_alloca(i64t, "b").unwrap();
+            let e_ptr = self.builder.build_alloca(ptr, "e").unwrap();
+            self.builder.build_store(b_ptr, i64t.const_zero()).unwrap();
+            self.builder.build_unconditional_branch(bloop).unwrap();
+            // bloop: if b >= old_nb -> finish
+            self.builder.position_at_end(bloop);
+            let bv = self
+                .builder
+                .build_load(i64t, b_ptr, "b")
+                .unwrap()
+                .into_int_value();
+            let b_done = self
+                .builder
+                .build_int_compare(IntPredicate::UGE, bv, old_nb, "bdone")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(b_done, finish, bbody)
+                .unwrap();
+            // bbody: e = old_buckets[b]
+            self.builder.position_at_end(bbody);
+            let boff = self
+                .builder
+                .build_int_mul(bv, i64t.const_int(8, false), "boff")
+                .unwrap();
+            let bslot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), old_buckets, &[boff], "bslot")
+                    .unwrap()
+            };
+            let head = self.builder.build_load(ptr, bslot, "head").unwrap();
+            self.builder.build_store(e_ptr, head).unwrap();
+            self.builder.build_unconditional_branch(cloop).unwrap();
+            // cloop: if e==null -> bnext
+            self.builder.position_at_end(cloop);
+            let e = self
+                .builder
+                .build_load(ptr, e_ptr, "e")
+                .unwrap()
+                .into_pointer_value();
+            let e_null = self.builder.build_is_null(e, "enull").unwrap();
+            self.builder
+                .build_conditional_branch(e_null, bnext, cbody)
+                .unwrap();
+            // cbody: next=e.next; idx=e.hash % new_nb; prepend e to new_buckets[idx]; e=next
+            self.builder.position_at_end(cbody);
+            let nx = self
+                .builder
+                .build_load(ptr, self.hdr_field(e, 24), "nx")
+                .unwrap();
+            let eh = self
+                .builder
+                .build_load(i64t, self.hdr_field(e, 8), "eh")
+                .unwrap()
+                .into_int_value();
+            let idx = self
+                .builder
+                .build_int_unsigned_rem(eh, new_nb, "idx")
+                .unwrap();
+            let noff = self
+                .builder
+                .build_int_mul(idx, i64t.const_int(8, false), "noff")
+                .unwrap();
+            let nslot = unsafe {
+                self.builder
+                    .build_in_bounds_gep(self.ctx.i8_type(), new_buckets, &[noff], "nslot")
+                    .unwrap()
+            };
+            let nhead = self.builder.build_load(ptr, nslot, "nhead").unwrap();
+            self.builder
+                .build_store(self.hdr_field(e, 24), nhead)
+                .unwrap();
+            self.builder.build_store(nslot, e).unwrap();
+            self.builder.build_store(e_ptr, nx).unwrap();
+            self.builder.build_unconditional_branch(cloop).unwrap();
+            // bnext: b++
+            self.builder.position_at_end(bnext);
+            let b1 = self
+                .builder
+                .build_int_add(bv, i64t.const_int(1, false), "b1")
+                .unwrap();
+            self.builder.build_store(b_ptr, b1).unwrap();
+            self.builder.build_unconditional_branch(bloop).unwrap();
+            // finish: hdr.nbuckets = new_nb; hdr.buckets = new_buckets
+            self.builder.position_at_end(finish);
+            self.builder
+                .build_store(self.hdr_field(hdr, 8), new_nb)
+                .unwrap();
+            self.builder
+                .build_store(self.hdr_field(hdr, 16), new_buckets)
+                .unwrap();
+            self.builder.build_return(None).unwrap();
+        }
+
         // --- void lumo_map_put(ptr hdr, ptr key, i64 hash, i64 val) ---
         let put_fn = self.module.add_function(
             "lumo_map_put",
@@ -619,6 +756,35 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_int_add(cnt, i64t.const_int(1, false), "cnt1")
                 .unwrap();
             self.builder.build_store(hdr, cnt1).unwrap();
+            // load factor 0.75 を超えたら resize: count*4 > nbuckets*3
+            let nb2 = self
+                .builder
+                .build_load(i64t, self.hdr_field(hdr, 8), "nb2")
+                .unwrap()
+                .into_int_value();
+            let lhs = self
+                .builder
+                .build_int_mul(cnt1, i64t.const_int(4, false), "lf_lhs")
+                .unwrap();
+            let rhs = self
+                .builder
+                .build_int_mul(nb2, i64t.const_int(3, false), "lf_rhs")
+                .unwrap();
+            let need = self
+                .builder
+                .build_int_compare(IntPredicate::UGT, lhs, rhs, "need_resize")
+                .unwrap();
+            let resize_bb = self.ctx.append_basic_block(put_fn, "resize");
+            let ret_bb = self.ctx.append_basic_block(put_fn, "ret");
+            self.builder
+                .build_conditional_branch(need, resize_bb, ret_bb)
+                .unwrap();
+            self.builder.position_at_end(resize_bb);
+            self.builder
+                .build_call(resize_fn, &[hdr.into()], "")
+                .unwrap();
+            self.builder.build_unconditional_branch(ret_bb).unwrap();
+            self.builder.position_at_end(ret_bb);
             self.builder.build_return(None).unwrap();
         }
 

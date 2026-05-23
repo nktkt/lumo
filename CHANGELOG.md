@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.24.1]
+
+### Changed
+
+- Maps now **resize automatically**: when the load factor exceeds 0.75 the hash table rehashes into a bucket array twice as large, so lookups stay near O(1) as a map grows (previously the bucket count was fixed at 64, degrading to O(n) for large maps). Internal only — no surface change. Completes [RFC 0002](docs/rfcs/0002-map-type.md) Step 5.
+
 ## [0.24.0]
 
 ### Added

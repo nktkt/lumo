@@ -1,6 +1,7 @@
 # keys() returns the keys as a [string] (order unspecified); we sort them for
-# deterministic output, then look each value back up. Also a collision stress
-# test: 50 keys into the fixed 64-bucket table exercises chaining.
+# deterministic output, then look each value back up. Also a stress test: 300
+# keys force the table to grow several times (64 -> 128 -> 256 -> 512), so this
+# exercises rehashing and chaining, with every key still resolving afterward.
 
 fn main() {
     let m = {"one": 1, "two": 2, "three": 3};
@@ -22,17 +23,17 @@ fn main() {
         print ks[k] + " = " + str(m[ks[k]]);
     }
 
-    # stress: 50 keys, summed back via keys()
+    # stress: 300 keys (forces several resizes), summed back via keys()
     let big: {string: int} = {};
-    for (let n = 0; n < 50; n = n + 1) {
+    for (let n = 0; n < 300; n = n + 1) {
         big["k" + str(n)] = n;
     }
-    print len(big);              # 50
+    print len(big);              # 300
     let bk = keys(big);
     let sum = 0;
     for (let p = 0; p < len(bk); p = p + 1) {
         sum = sum + big[bk[p]];
     }
-    print sum;                   # 0+1+...+49 = 1225
+    print sum;                   # 0+1+...+299 = 44850
     return 0;
 }

@@ -1,7 +1,9 @@
 # RFC 0002 — A built-in `map` (associative array) type for Lumo
 
-- **Status:** Implemented in `v0.24.0` (the recommended design below shipped;
-  `delete` and `keys` landed in the same cut; resize is still deferred).
+- **Status:** Implemented (`v0.24.0`, with automatic resize in `v0.24.1`). The
+  full recommended design below shipped, including `delete`, `keys`, and Step 5
+  resizing (load-factor 0.75 rehash). Remaining follow-ups: int keys and
+  `for k in m` iteration.
 - **Author:** Lumo contributors
 - **Created:** 2026-05-23
 - **Targets roadmap phase:** Phase 4 — Memory & runtime (`v0.5`), the
