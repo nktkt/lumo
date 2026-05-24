@@ -4,12 +4,95 @@
 //! ここを通過したプログラムは「型が正しい」とみなせるので、codegen は
 //! 型エラーを気にせず純粋な低レベル化に専念できる。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::diagnostics::Diagnostic;
 use crate::span::{FileId, Span};
-use crate::types::{intern, Type};
+use crate::types::{intern, intern_elem, Elem, Type};
+
+/// パース後・型検査前の正規化。パーサはユーザー定義型を一律 `Type::Struct(n)` として
+/// 作る（struct と enum を区別できない）ので、`n` が enum 名のものを `Type::Enum(n)`
+/// に書き換える。これで以降は struct と enum を正しく区別できる。codegen も同じ AST を
+/// 見るので、両者が一貫する。
+pub fn resolve_enum_types(program: &mut Program) {
+    let enums: HashSet<String> = program.enums.iter().map(|e| e.name.clone()).collect();
+    for s in &mut program.structs {
+        for f in &mut s.fields {
+            f.ty = resolve_ty(f.ty, &enums);
+        }
+    }
+    for e in &mut program.enums {
+        for v in &mut e.variants {
+            for ft in &mut v.fields {
+                *ft = resolve_ty(*ft, &enums);
+            }
+        }
+    }
+    for f in &mut program.funcs {
+        for p in &mut f.params {
+            p.ty = resolve_ty(p.ty, &enums);
+        }
+        f.ret = resolve_ty(f.ret, &enums);
+        for s in &mut f.body {
+            resolve_stmt(s, &enums);
+        }
+    }
+}
+
+fn resolve_ty(t: Type, enums: &HashSet<String>) -> Type {
+    match t {
+        Type::Struct(n) if enums.contains(n) => Type::Enum(n),
+        Type::Array(e) => Type::Array(resolve_elem(e, enums)),
+        Type::Map(e) => Type::Map(resolve_elem(e, enums)),
+        other => other,
+    }
+}
+
+fn resolve_elem(e: Elem, enums: &HashSet<String>) -> Elem {
+    match e {
+        Elem::Struct(n) if enums.contains(n) => Elem::Enum(n),
+        Elem::Array(inner) => Elem::Array(intern_elem(resolve_elem(*inner, enums))),
+        Elem::Map(inner) => Elem::Map(intern_elem(resolve_elem(*inner, enums))),
+        other => other,
+    }
+}
+
+fn resolve_stmt(s: &mut Stmt, enums: &HashSet<String>) {
+    match &mut s.kind {
+        StmtKind::Let { ty: Some(t), .. } => {
+            *t = resolve_ty(*t, enums);
+        }
+        StmtKind::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter_mut().for_each(|s| resolve_stmt(s, enums));
+            else_body.iter_mut().for_each(|s| resolve_stmt(s, enums));
+        }
+        StmtKind::While { body, .. } | StmtKind::ForIn { body, .. } => {
+            body.iter_mut().for_each(|s| resolve_stmt(s, enums));
+        }
+        StmtKind::For {
+            init, step, body, ..
+        } => {
+            if let Some(s) = init {
+                resolve_stmt(s, enums);
+            }
+            if let Some(s) = step {
+                resolve_stmt(s, enums);
+            }
+            body.iter_mut().for_each(|s| resolve_stmt(s, enums));
+        }
+        StmtKind::Match { arms, .. } => {
+            for a in arms {
+                a.body.iter_mut().for_each(|s| resolve_stmt(s, enums));
+            }
+        }
+        _ => {}
+    }
+}
 
 /// 関数シグネチャ（引数・戻り値の型と、可視性のための定義ファイル・pub）
 struct Sig {
@@ -29,6 +112,27 @@ struct StructInfo {
 
 /// 構造体名 -> 情報
 type Structs = HashMap<String, StructInfo>;
+
+/// enum の情報（バリアントの並びと、可視性のための定義ファイル・pub）
+struct EnumInfo {
+    /// 定義順の (バリアント名, ペイロード型の並び)
+    variants: Vec<(String, Vec<Type>)>,
+    file: FileId,
+    is_pub: bool,
+}
+
+/// バリアント名 -> 所属 enum・ペイロード型（バリアント名はグローバルに一意）。
+/// タグ（宣言順の添字）は codegen 側が別途持つので、ここでは保持しない。
+struct VariantInfo {
+    enum_name: &'static str,
+    fields: Vec<Type>,
+    file: FileId,
+    is_pub: bool,
+}
+
+/// enum 名 -> 情報 / バリアント名 -> 情報
+type Enums = HashMap<String, EnumInfo>;
+type Variants = HashMap<String, VariantInfo>;
 
 /// 別ファイルの private な項目を参照していないか検査する（RFC 0004）。
 /// 同一ファイル、または `pub` なら参照可。単一ファイルでは常に同一ファイルなので no-op。
@@ -51,10 +155,11 @@ fn check_accessible(
     Ok(())
 }
 
-/// 型が実在し、かつ `use_file` から参照可能か検証する（構造体名・配列要素も再帰的に）。
+/// 型が実在し、かつ `use_file` から参照可能か検証する（構造体・enum 名、配列要素も再帰的に）。
 fn validate_type(
     t: Type,
     structs: &Structs,
+    enums: &Enums,
     use_file: FileId,
     span: Span,
 ) -> Result<(), Diagnostic> {
@@ -67,8 +172,18 @@ fn validate_type(
             }
             Some(info) => check_accessible("構造体", n, info.file, info.is_pub, use_file, span)?,
         },
+        Type::Enum(n) => match enums.get(n) {
+            None => {
+                return Err(Diagnostic::error(format!("不明な型: {}", n))
+                    .with_code("E0300")
+                    .at(span));
+            }
+            Some(info) => check_accessible("enum", n, info.file, info.is_pub, use_file, span)?,
+        },
         // 入れ子コレクションは内側の要素型まで再帰的に検証する（[[Point]] など）
-        Type::Array(e) | Type::Map(e) => validate_type(e.to_type(), structs, use_file, span)?,
+        Type::Array(e) | Type::Map(e) => {
+            validate_type(e.to_type(), structs, enums, use_file, span)?
+        }
         _ => {}
     }
     Ok(())
@@ -113,19 +228,94 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
             },
         );
     }
-    // フィールドの型が実在し、その構造体から参照可能か検証
+
+    // 1b) enum レジストリ + バリアントレジストリ（バリアント名はグローバルに一意で、
+    //     型名・関数名・予約語と衝突しない＝Var/Call を一意に解決できる）。
+    let mut enums: Enums = HashMap::new();
+    let mut variants: Variants = HashMap::new();
+    for e in &program.enums {
+        if is_reserved_name(&e.name) || structs.contains_key(&e.name) {
+            return Err(Diagnostic::error(format!(
+                "{} は予約語・型名なので enum 名に使えません",
+                e.name
+            ))
+            .with_code("E0302")
+            .at(e.span));
+        }
+        if enums.contains_key(&e.name) {
+            return Err(
+                Diagnostic::error(format!("enum {} が二重に定義されています", e.name))
+                    .with_code("E0304")
+                    .at(e.span),
+            );
+        }
+        let ename = intern(&e.name);
+        let mut vlist: Vec<(String, Vec<Type>)> = Vec::new();
+        for v in &e.variants {
+            if is_reserved_name(&v.name)
+                || structs.contains_key(&v.name)
+                || enums.contains_key(&v.name)
+            {
+                return Err(Diagnostic::error(format!(
+                    "バリアント名 {} は予約語・型名と衝突しています",
+                    v.name
+                ))
+                .with_code("E0302")
+                .at(v.span));
+            }
+            if variants.contains_key(&v.name) {
+                return Err(Diagnostic::error(format!(
+                    "バリアント {} が二重に定義されています（バリアント名は全 enum で一意）",
+                    v.name
+                ))
+                .with_code("E0304")
+                .at(v.span));
+            }
+            variants.insert(
+                v.name.clone(),
+                VariantInfo {
+                    enum_name: ename,
+                    fields: v.fields.clone(),
+                    file: e.span.file,
+                    is_pub: e.is_pub,
+                },
+            );
+            vlist.push((v.name.clone(), v.fields.clone()));
+        }
+        enums.insert(
+            e.name.clone(),
+            EnumInfo {
+                variants: vlist,
+                file: e.span.file,
+                is_pub: e.is_pub,
+            },
+        );
+    }
+
+    // フィールド/ペイロードの型が実在し、定義元から参照可能か検証
     for s in &program.structs {
         for f in &s.fields {
-            validate_type(f.ty, &structs, s.span.file, f.span)?;
+            validate_type(f.ty, &structs, &enums, s.span.file, f.span)?;
+        }
+    }
+    for e in &program.enums {
+        for v in &e.variants {
+            for ft in &v.fields {
+                validate_type(*ft, &structs, &enums, e.span.file, v.span)?;
+            }
         }
     }
 
     // 2) 関数シグネチャを集める（前方参照・相互再帰のため）
     let mut sigs: HashMap<String, Sig> = HashMap::new();
     for f in &program.funcs {
-        if is_reserved_name(&f.name) || structs.contains_key(&f.name) {
+        if is_reserved_name(&f.name)
+            || structs.contains_key(&f.name)
+            || enums.contains_key(&f.name)
+            || variants.contains_key(&f.name)
+        {
             return Err(Diagnostic::error(format!(
-                "{} は型名・組み込み関数なので関数名に使えません",
+                "{} は型名・バリアント名・組み込み関数なので関数名に使えません",
                 f.name
             ))
             .with_code("E0302")
@@ -139,9 +329,9 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
             );
         }
         for p in &f.params {
-            validate_type(p.ty, &structs, f.span.file, p.span)?;
+            validate_type(p.ty, &structs, &enums, f.span.file, p.span)?;
         }
-        validate_type(f.ret, &structs, f.span.file, f.span)?;
+        validate_type(f.ret, &structs, &enums, f.span.file, f.span)?;
         sigs.insert(
             f.name.clone(),
             Sig {
@@ -164,6 +354,8 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
         let mut checker = FnChecker {
             sigs: &sigs,
             structs: &structs,
+            enums: &enums,
+            variants: &variants,
             // 関数スコープ（引数とトップレベルのローカル）を最初の層にする
             scopes: vec![HashMap::new()],
             ret: f.ret,
@@ -190,6 +382,8 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
 struct FnChecker<'a> {
     sigs: &'a HashMap<String, Sig>,
     structs: &'a Structs,
+    enums: &'a Enums,
+    variants: &'a Variants,
     /// レキシカルスコープのスタック（内側が末尾）。`let` は最内へ、参照は内→外で探索。
     scopes: Vec<HashMap<String, Type>>,
     ret: Type,
@@ -249,14 +443,14 @@ impl FnChecker<'_> {
                         return Err(Diagnostic::error(what).with_code("E0206").at(value.span));
                     }
                     let a = ty.unwrap();
-                    validate_type(a, self.structs, self.cur_file, stmt.span)?;
+                    validate_type(a, self.structs, self.enums, self.cur_file, stmt.span)?;
                     self.declare(name, a);
                     return Ok(());
                 }
                 let t = self.check_expr(value)?;
                 let declared = match ty {
                     Some(a) => {
-                        validate_type(*a, self.structs, self.cur_file, stmt.span)?;
+                        validate_type(*a, self.structs, self.enums, self.cur_file, stmt.span)?;
                         // 初期値が注釈型に代入可能か（null は参照型に可）
                         if t != *a && !(t == Type::Null && a.is_reference()) {
                             return Err(Diagnostic::error(format!(
@@ -403,6 +597,100 @@ impl FnChecker<'_> {
                 self.loops -= 1;
                 self.pop_scope();
             }
+            StmtKind::Match { scrut, arms } => {
+                // 被検査値は enum でなければならない。
+                let sty = self.check_expr(scrut)?;
+                let Type::Enum(ename) = sty else {
+                    return Err(Diagnostic::error(format!(
+                        "match できるのは enum ですが {} が使われています",
+                        sty.name()
+                    ))
+                    .with_code("E0205")
+                    .at(scrut.span));
+                };
+                // この enum の全バリアント名（網羅性チェック用）。
+                let all: Vec<String> = self.enums[ename]
+                    .variants
+                    .iter()
+                    .map(|(n, _)| n.clone())
+                    .collect();
+                let mut covered: Vec<String> = Vec::new();
+                let mut has_wildcard = false;
+                for arm in arms {
+                    if arm.wildcard {
+                        if has_wildcard {
+                            return Err(Diagnostic::error("`_` のアームが重複しています")
+                                .with_code("E0204")
+                                .at(arm.span));
+                        }
+                        has_wildcard = true;
+                        self.push_scope();
+                        for s in &arm.body {
+                            self.check_stmt(s)?;
+                        }
+                        self.pop_scope();
+                        continue;
+                    }
+                    // バリアントはこの enum に属していなければならない。
+                    let vinfo = self
+                        .variants
+                        .get(&arm.variant)
+                        .filter(|v| v.enum_name == ename);
+                    let Some(vinfo) = vinfo else {
+                        return Err(Diagnostic::error(format!(
+                            "{} は enum {} のバリアントではありません",
+                            arm.variant, ename
+                        ))
+                        .with_code("E0303")
+                        .at(arm.span));
+                    };
+                    if covered.contains(&arm.variant) {
+                        return Err(Diagnostic::error(format!(
+                            "バリアント {} のアームが重複しています",
+                            arm.variant
+                        ))
+                        .with_code("E0204")
+                        .at(arm.span));
+                    }
+                    if arm.bindings.len() != vinfo.fields.len() {
+                        return Err(Diagnostic::error(format!(
+                            "{} はフィールド{}個ですが束縛が{}個あります",
+                            arm.variant,
+                            vinfo.fields.len(),
+                            arm.bindings.len()
+                        ))
+                        .with_code("E0104")
+                        .at(arm.span));
+                    }
+                    let field_types = vinfo.fields.clone();
+                    covered.push(arm.variant.clone());
+                    // フィールドを束縛して本体を検査する。
+                    self.push_scope();
+                    for (b, ft) in arm.bindings.iter().zip(field_types.iter()) {
+                        self.declare(b, *ft);
+                    }
+                    for s in &arm.body {
+                        self.check_stmt(s)?;
+                    }
+                    self.pop_scope();
+                }
+                // 網羅性: 全バリアントを覆うか `_` があること。
+                if !has_wildcard {
+                    let missing: Vec<&str> = all
+                        .iter()
+                        .filter(|n| !covered.contains(n))
+                        .map(|s| s.as_str())
+                        .collect();
+                    if !missing.is_empty() {
+                        return Err(Diagnostic::error(format!(
+                            "match が網羅的ではありません。未処理のバリアント: {}",
+                            missing.join(", ")
+                        ))
+                        .with_code("E0209")
+                        .at(stmt.span));
+                    }
+                }
+            }
             StmtKind::Break => {
                 if self.loops == 0 {
                     return Err(Diagnostic::error("break はループの外では使えません")
@@ -441,11 +729,29 @@ impl FnChecker<'_> {
             ExprKind::Bool(_) => Ok(Type::Bool),
             ExprKind::Str(_) => Ok(Type::Str),
             ExprKind::Null => Ok(Type::Null),
-            ExprKind::Var(name) => self.lookup(name).ok_or_else(|| {
-                Diagnostic::error(format!("未定義の変数: {}", name))
-                    .with_code("E0101")
-                    .at(e.span)
-            }),
+            ExprKind::Var(name) => {
+                if let Some(t) = self.lookup(name) {
+                    Ok(t)
+                } else if let Some(v) = self.variants.get(name) {
+                    // 0 引数バリアントのコンストラクタ（`None` など）
+                    if !v.fields.is_empty() {
+                        return Err(Diagnostic::error(format!(
+                            "{} はフィールドを {} 個取ります（{}(...) と書いてください）",
+                            name,
+                            v.fields.len(),
+                            name
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    check_accessible("バリアント", name, v.file, v.is_pub, self.cur_file, e.span)?;
+                    Ok(Type::Enum(v.enum_name))
+                } else {
+                    Err(Diagnostic::error(format!("未定義の変数: {}", name))
+                        .with_code("E0101")
+                        .at(e.span))
+                }
+            }
             ExprKind::Unary { op, expr } => {
                 let t = self.check_expr(expr)?;
                 match op {
@@ -541,6 +847,37 @@ impl FnChecker<'_> {
                 }
             }
             ExprKind::Call { name, args } => {
+                // バリアントのコンストラクタ呼び出し（`Some(x)`, `Ok(v)` など）。
+                // 関数より先に解決する（名前はグローバルに一意なので衝突しない）。
+                if let Some(v) = self.variants.get(name) {
+                    let (enum_name, field_types, vfile, vpub) =
+                        (v.enum_name, v.fields.clone(), v.file, v.is_pub);
+                    check_accessible("バリアント", name, vfile, vpub, self.cur_file, e.span)?;
+                    if args.len() != field_types.len() {
+                        return Err(Diagnostic::error(format!(
+                            "{} はフィールド {} 個ですが {} 個渡されました",
+                            name,
+                            field_types.len(),
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    for (arg, ft) in args.iter().zip(field_types.iter()) {
+                        let at = self.check_expr(arg)?;
+                        if at != *ft && !(at == Type::Null && ft.is_reference()) {
+                            return Err(Diagnostic::error(format!(
+                                "{}: {} 型のフィールドに {} 型を渡しました",
+                                name,
+                                ft.name(),
+                                at.name()
+                            ))
+                            .with_code("E0200")
+                            .at(arg.span));
+                        }
+                    }
+                    return Ok(Type::Enum(enum_name));
+                }
                 // 組み込み変換 int()/float(): 数値を変換、または string をパースする
                 if name == "int" || name == "float" {
                     if args.len() != 1 {

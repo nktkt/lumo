@@ -1,0 +1,11 @@
+# E0204: 同じバリアントを 2 回マッチした。
+enum Color { R, G }
+fn main() {
+    let c = R;
+    match (c) {
+        R => print 1;
+        R => print 2;
+        G => print 3;
+    }
+    return 0;
+}

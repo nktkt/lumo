@@ -1,0 +1,30 @@
+# 再帰的な enum: バリアントのペイロードに自分自身を持てる（ヒープ参照なので有限サイズ）。
+# 二分木の合計と、コンスリスト（cons list）の長さを計算する。
+
+enum Tree { Leaf(int), Node(Tree, Tree) }
+enum List { Cons(int, List), Nil }
+
+fn sum(t: Tree) -> int {
+    match (t) {
+        Leaf(v) => return v;
+        Node(l, r) => return sum(l) + sum(r);
+    }
+}
+
+fn count(xs: List) -> int {
+    match (xs) {
+        Cons(_h, rest) => return 1 + count(rest);
+        Nil => return 0;
+    }
+}
+
+fn main() {
+    # ((1+2) + 3) + (4+5) = 15
+    let t = Node(Node(Node(Leaf(1), Leaf(2)), Leaf(3)), Node(Leaf(4), Leaf(5)));
+    print sum(t);   # 15
+
+    # 3 要素のリスト
+    let xs = Cons(10, Cons(20, Cons(30, Nil)));
+    print count(xs);  # 3
+    return 0;
+}

@@ -16,6 +16,8 @@ pub enum Tok {
     // キーワード
     Fn,
     Struct,
+    Enum,
+    Match,
     Import,
     Pub,
     Let,
@@ -64,6 +66,7 @@ pub enum Tok {
     AmpAmp,    // &&
     PipePipe,  // ||
     Arrow,     // ->
+    FatArrow,  // => (match のアーム)
     Amp,       // &  (ビット AND)
     Pipe,      // |  (ビット OR)
     Caret,     // ^  (ビット XOR)
@@ -311,6 +314,8 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
             let kind = match s.as_str() {
                 "fn" => Tok::Fn,
                 "struct" => Tok::Struct,
+                "enum" => Tok::Enum,
+                "match" => Tok::Match,
                 "import" => Tok::Import,
                 "pub" => Tok::Pub,
                 "let" => Tok::Let,
@@ -357,6 +362,7 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
                 ('&', '&') => Some(Tok::AmpAmp),
                 ('|', '|') => Some(Tok::PipePipe),
                 ('-', '>') => Some(Tok::Arrow),
+                ('=', '>') => Some(Tok::FatArrow),
                 ('+', '=') => Some(Tok::PlusEq),
                 ('-', '=') => Some(Tok::MinusEq),
                 ('*', '=') => Some(Tok::StarEq),

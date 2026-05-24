@@ -103,6 +103,7 @@ impl Parser {
         }
 
         let mut structs = Vec::new();
+        let mut enums = Vec::new();
         let mut funcs = Vec::new();
         while self.peek() != &Tok::Eof {
             // 任意の `pub` 修飾子（他ファイルへ公開する）。
@@ -112,13 +113,14 @@ impl Parser {
             }
             match self.peek() {
                 Tok::Struct => structs.push(self.parse_struct(is_pub)?),
+                Tok::Enum => enums.push(self.parse_enum(is_pub)?),
                 Tok::Fn => funcs.push(self.parse_function(is_pub)?),
                 // import が後から来たら、先頭に置くよう促す（紛れもない誤りを明確に）
                 Tok::Import => {
                     return Err(self.err("import はファイル先頭に置いてください"));
                 }
                 _ if is_pub => {
-                    return Err(self.err("pub の後には fn か struct が必要です"));
+                    return Err(self.err("pub の後には fn / struct / enum が必要です"));
                 }
                 _ => funcs.push(self.parse_function(is_pub)?),
             }
@@ -126,7 +128,57 @@ impl Parser {
         Ok(Program {
             imports,
             structs,
+            enums,
             funcs,
+        })
+    }
+
+    /// `enum Name { Variant [ "(" type {"," type} ")" ] {"," ...} [","] }`
+    fn parse_enum(&mut self, is_pub: bool) -> Result<EnumDef, Diagnostic> {
+        let start = self.cur_span().start;
+        self.eat(&Tok::Enum)?;
+        let (name, _) = self.parse_ident()?;
+        self.eat(&Tok::LBrace)?;
+        let mut variants = Vec::new();
+        if self.peek() != &Tok::RBrace {
+            loop {
+                let (vname, vname_span) = self.parse_ident()?;
+                let mut fields = Vec::new();
+                if self.peek() == &Tok::LParen {
+                    self.next();
+                    if self.peek() != &Tok::RParen {
+                        loop {
+                            fields.push(self.parse_type()?.0);
+                            if self.peek() == &Tok::Comma {
+                                self.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.eat(&Tok::RParen)?;
+                }
+                variants.push(EnumVariant {
+                    name: vname,
+                    fields,
+                    span: self.span(vname_span.start, self.last_end),
+                });
+                if self.peek() == &Tok::Comma {
+                    self.next();
+                    if self.peek() == &Tok::RBrace {
+                        break; // 末尾カンマ可
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        self.eat(&Tok::RBrace)?;
+        Ok(EnumDef {
+            name,
+            variants,
+            span: self.span(start, self.last_end),
+            is_pub,
         })
     }
 
@@ -348,6 +400,7 @@ impl Parser {
                 let body = self.parse_block()?;
                 StmtKind::While { cond, body }
             }
+            Tok::Match => self.parse_match()?,
             Tok::For => {
                 self.next();
                 self.eat(&Tok::LParen)?;
@@ -406,6 +459,62 @@ impl Parser {
             kind,
             span: self.span(start, self.last_end),
         })
+    }
+
+    /// `match scrut { Pattern => 文 ... }`。Pattern は `_` か `Variant` か
+    /// `Variant(b0, b1, ...)`。各アーム本体は1つの文（ブロックでも可）。
+    fn parse_match(&mut self) -> Result<StmtKind, Diagnostic> {
+        self.eat(&Tok::Match)?;
+        // 被検査値は括弧で囲む（if/while と同様）。これで直後の `{` を構造体リテラルと
+        // 取り違えずに match 本体の開きと判別できる。
+        self.eat(&Tok::LParen)?;
+        let scrut = self.parse_expr()?;
+        self.eat(&Tok::RParen)?;
+        self.eat(&Tok::LBrace)?;
+        let mut arms = Vec::new();
+        while self.peek() != &Tok::RBrace && self.peek() != &Tok::Eof {
+            let arm_start = self.cur_span().start;
+            // パターン: `_`（ワイルドカード）か `Variant` / `Variant(b...)`。
+            // `_` は識別子としてレキシングされる。
+            let (vname, _) = self.parse_ident()?;
+            let (wildcard, variant, bindings) = if vname == "_" {
+                (true, String::new(), Vec::new())
+            } else {
+                let mut binds = Vec::new();
+                if self.peek() == &Tok::LParen {
+                    self.next();
+                    if self.peek() != &Tok::RParen {
+                        loop {
+                            let (b, _) = self.parse_ident()?;
+                            binds.push(b);
+                            if self.peek() == &Tok::Comma {
+                                self.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.eat(&Tok::RParen)?;
+                }
+                (false, vname, binds)
+            };
+            self.eat(&Tok::FatArrow)?;
+            // 本体はブロック `{ ... }` か、単一の文 `stmt;`。
+            let body = if self.peek() == &Tok::LBrace {
+                self.parse_block()?
+            } else {
+                vec![self.parse_stmt()?]
+            };
+            arms.push(MatchArm {
+                wildcard,
+                variant,
+                bindings,
+                span: self.span(arm_start, self.last_end),
+                body,
+            });
+        }
+        self.eat(&Tok::RBrace)?;
+        Ok(StmtKind::Match { scrut, arms })
     }
 
     /// セミコロンを伴わない単純文（let / 代入 / 式）。for の init・step 用。

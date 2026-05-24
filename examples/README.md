@@ -66,3 +66,4 @@ Listed from simplest to most advanced:
 | [`use_mathx.lum`](use_mathx.lum) | Modules — `import "lib/mathx.lum"` pulls in a helper library (`gcd`/`lcm`) from a sibling file and calls its functions. |
 | [`guard.lum`](guard.lum) | Defensive programming — `assert(cond, msg)` to validate inputs and `panic(msg)` to fail fast (exit 101 with a message). |
 | [`leaderboard.lum`](leaderboard.lum) | Array ordering — `sorted` / `reversed` (non-mutating) with slicing to rank scores and take the top 3. |
+| [`calc.lum`](calc.lum) | Enums & pattern matching — a recursive `enum Expr` arithmetic tree evaluated with exhaustive `match`, plus a `Result`-style enum so division-by-zero is returned as an error instead of crashing. |

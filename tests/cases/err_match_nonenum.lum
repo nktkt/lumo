@@ -1,0 +1,8 @@
+# E0205: enum でない値を match した。
+fn main() {
+    let x = 5;
+    match (x) {
+        _ => print 1;
+    }
+    return 0;
+}

@@ -76,7 +76,7 @@ Status: ✅ done · 🟡 partial · ⬜ not started.
 | — | — | **Optimization** | 🟡 | `-O0`..`-O3` done; incremental/parallel compilation not done |
 | 5 | `v0.6` | **Modules & packages** | ⬜ | Module system, FFI, package manager + registry (alpha) |
 | 6 | `v0.7` | **Tooling & DX** | ⬜ | LSP, formatter, REPL, debug info (DWARF) |
-| 7 | `v0.8` | **Abstraction** | ⬜ | Generics, traits/interfaces, ADTs + pattern matching |
+| 7 | `v0.8` | **Abstraction** | 🟡 | ADTs (`enum`) + **pattern matching** done (v0.45); generics, traits/interfaces not done |
 | 8 | `v0.9` | **Compiler scale** | ⬜ | Query-based incremental + parallel compilation, opt passes |
 | 9 | `v1.0` | **Production-ready** | ⬜ | Stability guarantees, multi-target (incl. WASM), docs, governance |
 | 10 | `1.x+` | **Scale-out** | ⬜ | Concurrency, self-hosting, ecosystem, performance leadership |
@@ -158,7 +158,7 @@ Status: ✅ done · 🟡 partial · ⬜ not started.
 
 - **Generics** (monomorphized through LLVM).
 - **Traits / interfaces** for shared behavior.
-- **Algebraic data types + pattern matching** (`match`, exhaustiveness checks).
+- [x] **Algebraic data types + pattern matching** (`match`, exhaustiveness checks) — `enum` with recursive, payload-carrying variants and exhaustive `match`, v0.45 ([RFC 0005](docs/rfcs/0005-enum-match.md)).
 - Closures / first-class functions.
 
 **Exit:** a generic, trait-based collection library is expressible in Lumo itself.
@@ -233,12 +233,14 @@ These run continuously, not as one-off phases.
 ## Immediate next steps (next few PRs)
 
 Phases 1–4 are largely done (typed front end, full standard-library surface,
-modules with `import`/`pub`, and **GC-backed memory reclamation** as of v0.44 —
-see [Progress so far](#progress-so-far)). The highest-leverage work remaining, in
+modules with `import`/`pub`, and **GC-backed memory reclamation** as of v0.44),
+plus an early Phase 7 down payment — **`enum`s + pattern matching** in v0.45 —
+see [Progress so far](#progress-so-far). The highest-leverage work remaining, in
 rough order:
 
 1. **Generics / traits** (Phase 7) — the big front-end gap; generic collections
-   and functions instead of monomorphic built-ins.
+   and functions instead of monomorphic built-ins. This is also what unlocks a
+   real `Option<T>` / `Result<T, E>` on top of the new `enum`s.
 2. **Developer tooling** (Phase 6) — a formatter (needs comment-preserving
    infrastructure), then LSP / REPL.
 3. **Module system v2** — qualified imports (`import "x" as x; x.item`), the

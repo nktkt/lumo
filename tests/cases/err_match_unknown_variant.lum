@@ -1,0 +1,12 @@
+# E0303: 別の enum のバリアント名を match のパターンに使った。
+enum Color { R, G }
+enum Dir { N, S }
+fn main() {
+    let c = R;
+    match (c) {
+        R => print 1;
+        N => print 2;
+        G => print 3;
+    }
+    return 0;
+}

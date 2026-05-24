@@ -640,6 +640,85 @@ stops with `lumo: null reference` and a non-zero exit status — so check for
 
 ---
 
+## Enums and `match`
+
+A struct bundles values together — a `Point` is an `x` **and** a `y`. Sometimes
+you want the opposite: a value that is **one of** several shapes. That's an
+`enum`. Each named *variant* can carry its own payload values:
+
+```lumo
+enum Shape {
+    Circle(float),         # a radius
+    Rect(float, float),    # a width and a height
+    Unit,                  # nothing at all
+}
+```
+
+You build a value just by naming the variant, like calling a function —
+`Circle(2.0)`, `Rect(3.0, 4.0)`, or simply `Unit`. (Variant names are unique
+across all your enums, so there's no `Shape.` prefix to write.)
+
+To *use* an enum value you ask which variant it is, with `match`. Each arm names
+a variant, binds its payload to fresh names, and runs a body:
+
+```lumo
+fn area(s: Shape) -> float {
+    match (s) {
+        Circle(r)  => return 3.14159 * r * r;
+        Rect(w, h) => return w * h;
+        Unit       => return 1.0;
+    }
+}
+```
+
+Three things to know about `match`:
+
+- The value goes in **parentheses**: `match (s) { ... }` (just like `if (...)`).
+- It must be **exhaustive** — you have to handle *every* variant. If you forget
+  one, the program won't compile. (Add a variant later, and Lumo will point you
+  at each `match` that needs updating.) A trailing `_ =>` arm catches "everything
+  else" when you don't want to list them all.
+- An arm body is one statement (`=> return ...;`) or a `{ ... }` block of several.
+
+### Worked example: a safe divide
+
+Lumo's enums shine for results that might fail. Instead of crashing on a bad
+input, return one of two variants and let the caller `match` on it:
+
+```lumo
+enum Result {
+    Ok(int),
+    Err(string),
+}
+
+fn divide(a: int, b: int) -> Result {
+    if (b == 0) {
+        return Err("cannot divide by zero");
+    }
+    return Ok(a / b);
+}
+
+fn main() {
+    match (divide(10, 2)) {
+        Ok(v)  => print v;        # 5
+        Err(m) => print m;
+    }
+    match (divide(10, 0)) {
+        Ok(v)  => print v;
+        Err(m) => print m;        # cannot divide by zero
+    }
+    return 0;
+}
+```
+
+Because a variant's payload can be the enum itself, enums also describe
+**recursive** shapes — a binary tree is `enum Tree { Leaf(int), Node(Tree, Tree) }`,
+and you sum it with a `match` that recurses on `Node`. See
+[`examples/calc.lum`](../examples/calc.lum) for a small expression evaluator
+built exactly this way.
+
+---
+
 ## Built-in functions
 
 Lumo comes with a handful of built-in functions. They look like ordinary calls,
