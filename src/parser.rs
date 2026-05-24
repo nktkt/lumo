@@ -435,6 +435,11 @@ impl Parser {
             Tok::StarEq => Some(BinOp::Mul),
             Tok::SlashEq => Some(BinOp::Div),
             Tok::PercentEq => Some(BinOp::Mod),
+            Tok::AmpEq => Some(BinOp::BitAnd),
+            Tok::PipeEq => Some(BinOp::BitOr),
+            Tok::CaretEq => Some(BinOp::BitXor),
+            Tok::ShlEq => Some(BinOp::Shl),
+            Tok::ShrEq => Some(BinOp::Shr),
             _ => None,
         };
         if self.peek() == &Tok::Assign {

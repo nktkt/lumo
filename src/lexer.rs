@@ -67,6 +67,11 @@ pub enum Tok {
     Tilde,     // ~  (ビット NOT)
     Shl,       // << (左シフト)
     Shr,       // >> (右シフト)
+    AmpEq,     // &=
+    PipeEq,    // |=
+    CaretEq,   // ^=
+    ShlEq,     // <<=
+    ShrEq,     // >>=
     Eof,
 }
 
@@ -232,6 +237,21 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
             continue;
         }
 
+        // 3文字演算子（2文字より先に判定する: `<<=` を `<<` と誤認しないため）
+        if i + 2 < n {
+            let kind = match (chars[i].1, chars[i + 1].1, chars[i + 2].1) {
+                ('<', '<', '=') => Some(Tok::ShlEq),
+                ('>', '>', '=') => Some(Tok::ShrEq),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                let span = Span::new(file, off, byte_at(&chars, src, i + 3));
+                toks.push(Token { kind, span });
+                i += 3;
+                continue;
+            }
+        }
+
         // 2文字演算子
         if i + 1 < n {
             let kind = match (chars[i].1, chars[i + 1].1) {
@@ -249,6 +269,9 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
                 ('%', '=') => Some(Tok::PercentEq),
                 ('<', '<') => Some(Tok::Shl),
                 ('>', '>') => Some(Tok::Shr),
+                ('&', '=') => Some(Tok::AmpEq),
+                ('|', '=') => Some(Tok::PipeEq),
+                ('^', '=') => Some(Tok::CaretEq),
                 _ => None,
             };
             if let Some(kind) = kind {
