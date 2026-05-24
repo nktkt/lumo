@@ -1,0 +1,6 @@
+fn main() {
+    let n = 42;
+    assert(n < 10, "n must be < 10");
+    print "unreachable";
+    return 0;
+}
