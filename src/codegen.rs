@@ -62,6 +62,10 @@ pub struct CodeGen<'ctx> {
     loop_stack: Vec<(BasicBlock<'ctx>, BasicBlock<'ctx>)>,
     /// 構造体名 -> (LLVM構造体型, フィールド定義順の (名前, 型))
     structs: HashMap<String, (StructType<'ctx>, Vec<(String, Type)>)>,
+    /// enum 名 -> LLVM型 `{ i64 tag, i64×maxArity }`（ペイロードは8byteスロット）
+    enum_types: HashMap<String, StructType<'ctx>>,
+    /// バリアント名 -> (enum 名, タグ, ペイロード型の並び)
+    variants: HashMap<String, (String, u64, Vec<Type>)>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -75,6 +79,8 @@ impl<'ctx> CodeGen<'ctx> {
             strings: HashMap::new(),
             loop_stack: Vec::new(),
             structs: HashMap::new(),
+            enum_types: HashMap::new(),
+            variants: HashMap::new(),
         }
     }
 
@@ -96,11 +102,44 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// 内側のスコープから順に変数を探す。
     fn lookup_var(&self, name: &str) -> (PointerValue<'ctx>, Type) {
-        self.scopes
-            .iter()
-            .rev()
-            .find_map(|s| s.get(name).copied())
+        self.try_lookup_var(name)
             .expect("typeck guarantees the variable exists")
+    }
+
+    fn try_lookup_var(&self, name: &str) -> Option<(PointerValue<'ctx>, Type)> {
+        self.scopes.iter().rev().find_map(|s| s.get(name).copied())
+    }
+
+    /// バリアントのコンストラクタ `Variant` / `Variant(args)` を `{ tag, slots }` の
+    /// GC オブジェクトとして生成する（RFC 0005）。
+    fn construct_variant(&mut self, name: &str, args: &[Expr]) -> (BasicValueEnum<'ctx>, Type) {
+        let (enum_name, tag, field_types) = self.variants[name].clone();
+        let st = self.enum_types[&enum_name];
+        let size = st.size_of().unwrap();
+        let alloc = self.module.get_function("lumo_alloc").unwrap();
+        let obj = self
+            .builder
+            .build_call(alloc, &[size.into()], "enumobj")
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_pointer_value();
+        // tag をフィールド0に格納
+        let tag_ptr = self.builder.build_struct_gep(st, obj, 0, "tag").unwrap();
+        self.builder
+            .build_store(tag_ptr, self.ctx.i64_type().const_int(tag, false))
+            .unwrap();
+        // 各ペイロードを 8byte スロット(フィールド i+1)に格納
+        for (i, (arg, ft)) in args.iter().zip(field_types.iter()).enumerate() {
+            let (av, _) = self.gen_expr(arg);
+            let raw = self.to_slot_i64(av, *ft);
+            let slot = self
+                .builder
+                .build_struct_gep(st, obj, (i + 1) as u32, "slot")
+                .unwrap();
+            self.builder.build_store(slot, raw).unwrap();
+        }
+        (obj.into(), Type::Enum(intern(&enum_name)))
     }
 
     /// Lumo の型に対応する LLVM の基本型。
@@ -110,9 +149,12 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().into(),
             Type::Bool => self.ctx.bool_type().into(),
             Type::Float => self.ctx.f64_type().into(),
-            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Map(_) | Type::Null => {
-                self.ctx.ptr_type(AddressSpace::default()).into()
-            }
+            Type::Str
+            | Type::Array(_)
+            | Type::Struct(_)
+            | Type::Enum(_)
+            | Type::Map(_)
+            | Type::Null => self.ctx.ptr_type(AddressSpace::default()).into(),
         }
     }
 
@@ -122,7 +164,12 @@ impl<'ctx> CodeGen<'ctx> {
             Type::Int => self.ctx.i64_type().const_int(0, false).into(),
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::Float => self.ctx.f64_type().const_float(0.0).into(),
-            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Map(_) | Type::Null => self
+            Type::Str
+            | Type::Array(_)
+            | Type::Struct(_)
+            | Type::Enum(_)
+            | Type::Map(_)
+            | Type::Null => self
                 .ctx
                 .ptr_type(AddressSpace::default())
                 .const_null()
@@ -142,6 +189,24 @@ impl<'ctx> CodeGen<'ctx> {
             let st = self.ctx.struct_type(&field_types, false);
             let fields = s.fields.iter().map(|f| (f.name.clone(), f.ty)).collect();
             self.structs.insert(s.name.clone(), (st, fields));
+        }
+
+        // 2b) enum の LLVM 型を登録する。値は `{ i64 tag, i64×maxArity }` の
+        //     ヒープオブジェクト（ペイロードは全て 8byte スロット）。
+        let i64t = self.ctx.i64_type();
+        for e in &program.enums {
+            let max_arity = e.variants.iter().map(|v| v.fields.len()).max().unwrap_or(0);
+            // フィールドは tag(1) + ペイロードスロット(max_arity)、すべて i64。
+            let fields: Vec<BasicTypeEnum> =
+                std::iter::repeat_n(i64t.into(), 1 + max_arity).collect();
+            let st = self.ctx.struct_type(&fields, false);
+            self.enum_types.insert(e.name.clone(), st);
+            for (idx, v) in e.variants.iter().enumerate() {
+                self.variants.insert(
+                    v.name.clone(),
+                    (e.name.clone(), idx as u64, v.fields.clone()),
+                );
+            }
         }
 
         // 3) すべての関数シグネチャを先に宣言する（前方参照・相互再帰のため）。
@@ -3380,8 +3445,12 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_call(printf, &[fmt.into(), s.into()], "printf_call")
                             .unwrap();
                     }
-                    Type::Array(_) | Type::Struct(_) | Type::Map(_) | Type::Null => {
-                        unreachable!("typeck forbids printing arrays/structs/maps/null")
+                    Type::Array(_)
+                    | Type::Struct(_)
+                    | Type::Enum(_)
+                    | Type::Map(_)
+                    | Type::Null => {
+                        unreachable!("typeck forbids printing arrays/structs/enums/maps/null")
                     }
                 }
             }
@@ -3603,6 +3672,89 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.position_at_end(end_bb);
                 self.pop_scope(); // ループ変数のスコープ
             }
+            StmtKind::Match { scrut, arms } => {
+                let i64t = self.ctx.i64_type();
+                let (sv, sty) = self.gen_expr(scrut);
+                let obj = sv.into_pointer_value();
+                self.null_check(obj);
+                let Type::Enum(ename) = sty else {
+                    unreachable!("typeck guarantees an enum scrutinee");
+                };
+                let st = self.enum_types[ename];
+                // タグ(フィールド0)を読む
+                let tag_ptr = self.builder.build_struct_gep(st, obj, 0, "tag").unwrap();
+                let tag = self
+                    .builder
+                    .build_load(i64t, tag_ptr, "tagval")
+                    .unwrap()
+                    .into_int_value();
+
+                let merge_bb = self.ctx.append_basic_block(function, "match.end");
+                // 各アームのブロックを作る（まだ中身は埋めない＝builder は移動しない）
+                let mut blocks: Vec<BasicBlock> = Vec::new();
+                let mut cases: Vec<(inkwell::values::IntValue, BasicBlock)> = Vec::new();
+                let mut default_bb: Option<BasicBlock> = None;
+                for arm in arms {
+                    let bb = self.ctx.append_basic_block(function, "match.arm");
+                    blocks.push(bb);
+                    if arm.wildcard {
+                        default_bb = Some(bb);
+                    } else {
+                        let tagv = self.variants[&arm.variant].1;
+                        cases.push((i64t.const_int(tagv, false), bb));
+                    }
+                }
+                // 既定: ワイルドカードがあればそのブロック、無ければ到達不能ブロック
+                // （typeck が網羅性を保証している）。
+                let unreachable_bb = if default_bb.is_none() {
+                    Some(self.ctx.append_basic_block(function, "match.unreachable"))
+                } else {
+                    None
+                };
+                let default = default_bb.unwrap_or_else(|| unreachable_bb.unwrap());
+                // switch は元のブロック（builder の現在地）に積む
+                self.builder.build_switch(tag, default, &cases).unwrap();
+                if let Some(ub) = unreachable_bb {
+                    self.builder.position_at_end(ub);
+                    self.builder.build_unreachable().unwrap();
+                }
+
+                // 各アーム本体を生成（フィールドを束縛してから）
+                for (arm, &bb) in arms.iter().zip(blocks.iter()) {
+                    self.builder.position_at_end(bb);
+                    self.push_scope();
+                    if !arm.wildcard {
+                        let field_types = self.variants[&arm.variant].2.clone();
+                        for (i, (b, ft)) in arm.bindings.iter().zip(field_types.iter()).enumerate()
+                        {
+                            let slot = self
+                                .builder
+                                .build_struct_gep(st, obj, (i + 1) as u32, "slot")
+                                .unwrap();
+                            let raw = self
+                                .builder
+                                .build_load(i64t, slot, "raw")
+                                .unwrap()
+                                .into_int_value();
+                            let val = self.slot_to_value(raw, *ft);
+                            let alloca = self.builder.build_alloca(self.basic_ty(*ft), b).unwrap();
+                            self.builder.build_store(alloca, val).unwrap();
+                            self.declare_var(b, alloca, *ft);
+                        }
+                    }
+                    for s in &arm.body {
+                        if !self.block_open() {
+                            break; // return/break などで本体が途中終了した
+                        }
+                        self.gen_stmt(s, function);
+                    }
+                    self.pop_scope();
+                    if self.block_open() {
+                        self.builder.build_unconditional_branch(merge_bb).unwrap();
+                    }
+                }
+                self.builder.position_at_end(merge_bb);
+            }
             StmtKind::Break => {
                 let (_, brk) = *self.loop_stack.last().unwrap();
                 self.builder.build_unconditional_branch(brk).unwrap();
@@ -3643,12 +3795,16 @@ impl<'ctx> CodeGen<'ctx> {
                 Type::Null,
             ),
             ExprKind::Var(name) => {
-                let (ptr, ty) = self.lookup_var(name);
-                let v = self
-                    .builder
-                    .build_load(self.basic_ty(ty), ptr, name)
-                    .unwrap();
-                (v, ty)
+                // ローカル変数が優先（typeck と同じ順）。無ければ 0 引数バリアント。
+                if let Some((ptr, ty)) = self.try_lookup_var(name) {
+                    let v = self
+                        .builder
+                        .build_load(self.basic_ty(ty), ptr, name)
+                        .unwrap();
+                    (v, ty)
+                } else {
+                    self.construct_variant(name, &[])
+                }
             }
             ExprKind::Unary { op, expr } => {
                 let (v, ty) = self.gen_expr(expr);
@@ -3716,6 +3872,10 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
             },
+            // バリアントのコンストラクタ呼び出し（`Some(x)` など）。組み込み/関数より先に。
+            ExprKind::Call { name, args } if self.variants.contains_key(name) => {
+                self.construct_variant(name, args)
+            }
             ExprKind::Call { name, args } if name == "int" => {
                 // float -> int は切り捨て、string -> int はパース（不正なら panic）、int は恒等
                 let (v, ty) = self.gen_expr(&args[0]);

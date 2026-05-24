@@ -143,6 +143,11 @@ pub enum StmtKind {
         iter: Expr,
         body: Vec<Stmt>,
     },
+    /// `match scrut { arm... }` — 直和型の分岐（網羅性は typeck が検査）。
+    Match {
+        scrut: Expr,
+        arms: Vec<MatchArm>,
+    },
     Break,
     Continue,
     ExprStmt(Expr),
@@ -177,6 +182,37 @@ pub struct StructDef {
     pub is_pub: bool,
 }
 
+/// enum の1つのバリアント `Variant` / `Variant(T, U)`（位置引数のペイロード）。
+#[derive(Debug, Clone)]
+pub struct EnumVariant {
+    pub name: String,
+    pub fields: Vec<Type>,
+    pub span: Span,
+}
+
+/// enum 定義（直和型）`enum Name { A, B(T), C(T, U) }`
+#[derive(Debug, Clone)]
+pub struct EnumDef {
+    pub name: String,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+    pub is_pub: bool,
+}
+
+/// `match` の1つのアーム `Pattern => 文`。`Pattern` は `_`（ワイルドカード）か
+/// `Variant`（0引数）か `Variant(b0, b1, ...)`（フィールドを変数に束縛）。
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    /// ワイルドカード `_` なら true（`variant`/`bindings` は使わない）。
+    pub wildcard: bool,
+    pub variant: String,
+    pub bindings: Vec<String>,
+    /// アーム本体。`=> stmt;` なら 1 要素、`=> { ... }` ならブロック内の文の並び。
+    /// 束縛したフィールドはこの本体の間だけ有効。
+    pub body: Vec<Stmt>,
+    pub span: Span,
+}
+
 /// `import "path";` 宣言（ファイル先頭に置く）。パスは import する側のファイルからの相対。
 #[derive(Debug, Clone)]
 pub struct ImportDecl {
@@ -191,5 +227,6 @@ pub struct ImportDecl {
 pub struct Program {
     pub imports: Vec<ImportDecl>,
     pub structs: Vec<StructDef>,
+    pub enums: Vec<EnumDef>,
     pub funcs: Vec<Function>,
 }

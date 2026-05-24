@@ -1,0 +1,29 @@
+# match アームの本体がブロック `{ ... }`（複数文・入れ子 match・途中 return）でも動く。
+enum Sign { Neg, Zero, Pos }
+
+fn classify(n: int) -> Sign {
+    if (n < 0) { return Neg; }
+    if (n == 0) { return Zero; }
+    return Pos;
+}
+
+fn describe(n: int) -> string {
+    match (classify(n)) {
+        Neg => {
+            let m = 0 - n;
+            return "negative (abs {m})";
+        }
+        Zero => return "zero";
+        Pos => {
+            let doubled = n * 2;
+            return "positive (x2 = {doubled})";
+        }
+    }
+}
+
+fn main() {
+    print describe(-7);   # negative (abs 7)
+    print describe(0);    # zero
+    print describe(21);   # positive (x2 = 42)
+    return 0;
+}

@@ -655,6 +655,83 @@ reclaimed automatically by the garbage collector; see
 array of structs (`[Point]`) is allowed; indexing yields the struct, so
 `ps[i].x` reads and `ps[i].x = v;` mutates it in place.
 
+## Enums and pattern matching
+
+An `enum` is a **sum type**: a value that is exactly one of several named
+*variants*. Each variant may carry positional payload values (zero or more):
+
+```lumo
+enum Shape {
+    Circle(float),         # one payload
+    Rect(float, float),    # two payloads
+    Unit,                  # no payload
+}
+```
+
+- **Construct** a value by naming the variant, like a call: `Circle(2.0)`,
+  `Rect(3.0, 4.0)`, or just `Unit` for a payload-less one. Variant names are
+  **global** (unique across all enums), so no `Shape.` prefix is needed.
+- A variant's payload may reference the enum itself, so enums are **recursive**
+  (payloads are heap references under the hood). This gives trees and lists:
+
+```lumo
+enum Tree { Leaf(int), Node(Tree, Tree) }
+
+let t = Node(Node(Leaf(1), Leaf(2)), Leaf(3));
+```
+
+Inspect an enum value with **`match`**. The scrutinee is parenthesized (like
+`if`/`while`), and each arm is a pattern, `=>`, and a body:
+
+```lumo
+fn area(s: Shape) -> float {
+    match (s) {
+        Circle(r)  => return 3.14159 * r * r;   # binds the payload to `r`
+        Rect(w, h) => return w * h;             # binds both fields
+        Unit       => return 1.0;
+    }
+}
+```
+
+- A **pattern** is a variant name, optionally binding its payloads to fresh
+  variables (`Rect(w, h)`). The bindings are in scope only within that arm.
+- An arm body is a single statement (`=> return x;`) or a **block** of several
+  statements (`=> { let m = -x; return m; }`).
+- `_` is a **wildcard** arm matching any remaining variant.
+- `match` is **exhaustive**: every variant must be covered, or a trailing `_`
+  must catch the rest — otherwise it's a compile error (`E0209`). This means
+  adding a variant turns every now-incomplete `match` into an error you must
+  fix, rather than a silent fall-through at runtime.
+
+`match` is a statement, so use it for control flow (each arm typically
+`return`s, `print`s, or assigns). Lumo has no generics yet, so the common
+`Option`/`Result` types are written out per element type:
+
+```lumo
+enum Result { Ok(int), Err(string) }
+
+fn checked_div(a: int, b: int) -> Result {
+    if (b == 0) { return Err("division by zero"); }
+    return Ok(a / b);
+}
+
+match (checked_div(10, 0)) {
+    Ok(v)  => print v;
+    Err(m) => print m;            # division by zero
+}
+```
+
+Like structs, enum values are heap-allocated and reclaimed by the garbage
+collector ([RFC 0001](rfcs/0001-memory-model.md)); the full design is
+[RFC 0005](rfcs/0005-enum-match.md). Enums may be `pub` for use across modules,
+and may appear as array/map element types (`[Shape]`, `{string: Shape}`).
+
+Common mistakes are caught at compile time: matching a non-enum value
+(`E0205`), a non-exhaustive `match` (`E0209`), a pattern naming an unknown or
+wrong-enum variant (`E0303`), a duplicated arm (`E0204`), and constructing or
+binding a variant with the wrong number of payloads (`E0104`). Variant names
+must be globally unique (`E0304`).
+
 ## null
 
 `null` is a value compatible with any **reference type** (`string`, an array, or
@@ -970,9 +1047,9 @@ underline pointing at the offending span. Error codes are grouped by phase:
 | ------- | ----------------- | -------------------------------------------------------------- |
 | `E000x` | Lexing            | invalid characters or malformed tokens                         |
 | `E002`  | Parsing           | syntax errors                                                  |
-| `E01xx` | Names / arity     | undefined variable or function, wrong arity, duplicate function, missing `main` |
-| `E02xx` | Types             | type mismatch, non-`bool` condition, returning the wrong type   |
-| `E03xx` | Type annotations  | unknown type name, duplicate parameter                          |
+| `E01xx` | Names / arity     | undefined variable or function, wrong arity (incl. variant payloads), duplicate function, missing `main` |
+| `E02xx` | Types             | type mismatch, non-`bool` condition, returning the wrong type, matching a non-enum, non-exhaustive or duplicated `match` arm |
+| `E03xx` | Type annotations  | unknown type name, duplicate parameter, unknown variant, duplicate type/variant name |
 
 ## CLI
 
@@ -988,9 +1065,11 @@ The following EBNF-ish sketch outlines the syntax. `{ X }` means zero or more
 repetitions and `[ X ]` means optional.
 
 ```ebnf
-program     = { struct_def | function } ;
+program     = { struct_def | enum_def | function } ;
 
 struct_def  = "struct" ident "{" [ param { "," param } [ "," ] ] "}" ;
+enum_def    = "enum" ident "{" [ variant { "," variant } [ "," ] ] "}" ;
+variant     = ident [ "(" type { "," type } ")" ] ;
 function    = "fn" ident "(" [ params ] ")" [ "->" type ] block ;
 params      = param { "," param } ;
 param       = ident ":" type ;
@@ -1006,6 +1085,7 @@ statement   = let_stmt
             | while_stmt
             | for_stmt
             | forin_stmt
+            | match_stmt
             | break_stmt
             | continue_stmt
             | expr_stmt ;
@@ -1018,6 +1098,9 @@ if_stmt     = "if" "(" expr ")" block [ "else" block ] ;
 while_stmt  = "while" "(" expr ")" block ;
 for_stmt    = "for" "(" [ simple ] ";" expr ";" [ simple ] ")" block ;
 forin_stmt  = "for" "(" ident "in" expr ")" block ;
+match_stmt  = "match" "(" expr ")" "{" { match_arm } "}" ;
+match_arm   = pattern "=>" ( statement | block ) ;
+pattern     = "_" | ident [ "(" ident { "," ident } ")" ] ;
 break_stmt  = "break" ";" ;
 continue_stmt = "continue" ";" ;
 expr_stmt   = expr ";" ;

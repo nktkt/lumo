@@ -1,0 +1,49 @@
+# enum + match: 直和型とパターンマッチの総合テスト。
+# - 異なるアリティのペイロード（0/1/2 個）
+# - match の網羅、ワイルドカード、フィールド束縛
+# - enum を配列に入れて回す
+
+enum Shape { Circle(float), Rect(float, float), Unit }
+enum Opt { Some(int), None }
+
+# ペイロードを束縛して使う。全バリアントを処理（網羅的）。
+fn area(s: Shape) -> float {
+    match (s) {
+        Circle(r) => return 3.14159 * r * r;
+        Rect(w, h) => return w * h;
+        Unit => return 1.0;
+    }
+}
+
+# ワイルドカードで「残り」をまとめて処理。
+fn unwrap_or(o: Opt, d: int) -> int {
+    match (o) {
+        Some(x) => return x;
+        _ => return d;
+    }
+}
+
+fn main() {
+    print area(Circle(2.0));      # 12.56636
+    print area(Rect(3.0, 4.0));   # 12
+    print area(Unit);             # 1
+
+    print unwrap_or(Some(42), 0); # 42
+    print unwrap_or(None, -1);    # -1
+
+    # enum を配列に入れて畳み込む
+    let xs: [Opt] = [Some(1), None, Some(3), None, Some(10)];
+    let total = 0;
+    for (e in xs) {
+        total = total + unwrap_or(e, 0);
+    }
+    print total;                  # 14
+
+    # match を文として使い、束縛をその場で出力する
+    let o = Some(7);
+    match (o) {
+        Some(x) => print x * x;   # 49
+        None => print 0;
+    }
+    return 0;
+}

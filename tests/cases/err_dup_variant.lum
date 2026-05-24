@@ -1,0 +1,4 @@
+# E0304: バリアント名は全 enum でグローバルに一意（Dup が二重）。
+enum A { Dup }
+enum B { Dup }
+fn main() { return 0; }

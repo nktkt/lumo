@@ -209,6 +209,24 @@ fn array_structs() {
     run_ok("array_structs");
 }
 
+/// enum + match: payloads of varying arity, wildcard, field binding, enums in arrays.
+#[test]
+fn enums_and_match() {
+    run_ok("enums");
+}
+
+/// Recursive enums (binary tree, cons list) — variant payloads referencing the enum.
+#[test]
+fn recursive_enums() {
+    run_ok("enum_recursive");
+}
+
+/// Match arm bodies can be blocks: multiple statements, locals, early return.
+#[test]
+fn match_block_arms() {
+    run_ok("match_blocks");
+}
+
 #[test]
 fn stringify() {
     run_ok("stringify");
@@ -610,4 +628,34 @@ fn err_str_struct() {
 #[test]
 fn err_string_assign() {
     run_err("err_string_assign", "E0207");
+}
+
+#[test]
+fn err_match_nonexhaustive() {
+    run_err("err_match_nonexhaustive", "E0209");
+}
+
+#[test]
+fn err_match_unknown_variant() {
+    run_err("err_match_unknown_variant", "E0303");
+}
+
+#[test]
+fn err_match_nonenum() {
+    run_err("err_match_nonenum", "E0205");
+}
+
+#[test]
+fn err_variant_arity() {
+    run_err("err_variant_arity", "E0104");
+}
+
+#[test]
+fn err_dup_variant() {
+    run_err("err_dup_variant", "E0304");
+}
+
+#[test]
+fn err_match_dup_arm() {
+    run_err("err_match_dup_arm", "E0204");
 }

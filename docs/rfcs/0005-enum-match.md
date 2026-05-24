@@ -1,6 +1,6 @@
 # RFC 0005 — Sum types (`enum`) and pattern matching (`match`)
 
-- **Status:** Proposed (draft).
+- **Status:** Implemented (v0.45.0).
 - **Author:** Lumo contributors
 - **Created:** 2026-05-24
 - **Targets roadmap phase:** Phase 3/7 — type system (sum types are the missing
@@ -8,6 +8,16 @@
 - **Tracking issue:** _TBD_
 - **Depends on:** structs (`v0.13`, the heap-aggregate machinery this reuses) and
   the GC (`v0.44`, so enum payloads are reclaimed like any heap value).
+
+> **Implemented in v0.45.0**, with two refinements to the surface below: the
+> `match` scrutinee is **parenthesized** — `match (x) { ... }`, consistent with
+> `if`/`while`/`for`, which also resolves the `match x { ... }`-vs-struct-literal
+> parse ambiguity — and an arm body may be **either a single statement or a
+> `{ ... }` block** (`Variant(a) => { ...; return v; }`). Variant construction
+> reuses identifier/call syntax and is resolved in the type checker, so no new
+> expression form was needed. Everything else (global variant names, positional
+> payloads, `match`-as-statement, exhaustiveness, `{ i64 tag, slot×maxArity }`
+> representation lowered to an LLVM `switch`) shipped as designed.
 
 > **This is a request for comments, not a settled decision.** Lumo has *product*
 > types (`struct`: "an `x` **and** a `y`") but no *sum* types ("an `int` **or** a

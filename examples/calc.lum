@@ -1,0 +1,92 @@
+# Enums & pattern matching (Phase 23 / v0.45)
+#
+# `enum` declares a sum type; each variant may carry positional payloads, and a
+# variant's payload can reference the enum itself, so enums are recursive (heap
+# references under the hood, reclaimed by the GC — RFC 0001/0005).
+#
+# Variant names are global, so you construct a value just by naming the variant
+# (`Num(3)`, `Nil`). `match (x) { ... }` dispatches on the variant and binds its
+# fields; it must be exhaustive (cover every variant, or end with `_`).
+#
+# Here: a tiny arithmetic expression tree, evaluated by recursion over `match`,
+# plus a Result-style enum so division can fail without crashing the program.
+
+enum Expr {
+    Num(int),
+    Add(Expr, Expr),
+    Mul(Expr, Expr),
+    Neg(Expr),
+    Div(Expr, Expr),
+}
+
+# A typed result: either a value, or an error message. (Lumo has no generics
+# yet, so this is specialized to int — the usual pattern for now.)
+enum Result {
+    Ok(int),
+    Err(string),
+}
+
+fn eval(e: Expr) -> Result {
+    match (e) {
+        Num(n) => return Ok(n);
+        Neg(a) => {
+            # propagate errors from the sub-expression
+            match (eval(a)) {
+                Ok(x) => return Ok(0 - x);
+                Err(m) => return Err(m);
+            }
+        }
+        Add(a, b) => return combine(eval(a), eval(b), 0);
+        Mul(a, b) => return combine(eval(a), eval(b), 1);
+        Div(a, b) => {
+            match (eval(b)) {
+                Ok(d) => {
+                    if (d == 0) { return Err("division by zero"); }
+                    match (eval(a)) {
+                        Ok(n) => return Ok(n / d);
+                        Err(m) => return Err(m);
+                    }
+                }
+                Err(m) => return Err(m);
+            }
+        }
+    }
+}
+
+# Apply op (0=add, 1=mul) to two results, short-circuiting on the first error.
+fn combine(l: Result, r: Result, op: int) -> Result {
+    match (l) {
+        Err(m) => return Err(m);
+        Ok(x) => {
+            match (r) {
+                Err(m) => return Err(m);
+                Ok(y) => {
+                    if (op == 0) { return Ok(x + y); }
+                    return Ok(x * y);
+                }
+            }
+        }
+    }
+}
+
+fn show(label: string, e: Expr) {
+    match (eval(e)) {
+        Ok(v) => print "{label} = {v}";
+        Err(m) => print "{label}: error: {m}";
+    }
+}
+
+fn main() {
+    # (2 + 3) * -4  =  -20
+    let a = Mul(Add(Num(2), Num(3)), Neg(Num(4)));
+    show("(2 + 3) * -4", a);
+
+    # 100 / (5 - 5)  ->  caught as an error, not a crash
+    let b = Div(Num(100), Add(Num(5), Neg(Num(5))));
+    show("100 / 0", b);
+
+    # 84 / 2  =  42
+    let c = Div(Num(84), Num(2));
+    show("84 / 2", c);
+    return 0;
+}

@@ -11,6 +11,8 @@ pub enum Elem {
     Float,
     Str,
     Struct(&'static str),
+    /// ユーザー定義の enum（直和型）を要素/値に持つ。
+    Enum(&'static str),
     /// 配列を要素に持つ（`[[T]]`）。指す先はその内側の配列の要素型。
     Array(&'static Elem),
     /// map を要素/値に持つ（`[{string: V}]` や `{string: {string: V}}`）。
@@ -26,6 +28,7 @@ impl Elem {
             Elem::Float => "float".to_string(),
             Elem::Str => "string".to_string(),
             Elem::Struct(n) => n.to_string(),
+            Elem::Enum(n) => n.to_string(),
             Elem::Array(e) => format!("[{}]", e.name()),
             Elem::Map(v) => format!("{{string: {}}}", v.name()),
         }
@@ -38,6 +41,7 @@ impl Elem {
             Elem::Float => Type::Float,
             Elem::Str => Type::Str,
             Elem::Struct(n) => Type::Struct(n),
+            Elem::Enum(n) => Type::Enum(n),
             Elem::Array(e) => Type::Array(*e),
             Elem::Map(v) => Type::Map(*v),
         }
@@ -56,6 +60,8 @@ pub enum Type {
     /// ユーザー定義の構造体（名前で参照。ヒープ確保したポインタ）。
     /// 名前は `intern` でリークして `&'static str` にし、`Copy` を保つ。
     Struct(&'static str),
+    /// ユーザー定義の enum（直和型。名前で参照。ヒープ確保した {tag, slots} へのポインタ）。
+    Enum(&'static str),
     /// 連想配列 `{string: V}`。キーは string 固定、値の型は `Elem`（v1 はスカラ/構造体）。
     /// ヒープ確保したハッシュ表ヘッダへのポインタ（RFC 0002）。
     Map(Elem),
@@ -72,6 +78,7 @@ impl Type {
             Type::Str => "string".to_string(),
             Type::Array(e) => format!("[{}]", e.name()),
             Type::Struct(n) => n.to_string(),
+            Type::Enum(n) => n.to_string(),
             Type::Map(v) => format!("{{string: {}}}", v.name()),
             Type::Null => "null".to_string(),
         }
@@ -86,7 +93,7 @@ impl Type {
     pub fn is_reference(self) -> bool {
         matches!(
             self,
-            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Map(_)
+            Type::Str | Type::Array(_) | Type::Struct(_) | Type::Enum(_) | Type::Map(_)
         )
     }
 
@@ -100,6 +107,7 @@ impl Type {
             Type::Float => Some(Elem::Float),
             Type::Str => Some(Elem::Str),
             Type::Struct(n) => Some(Elem::Struct(n)),
+            Type::Enum(n) => Some(Elem::Enum(n)),
             Type::Array(e) => Some(Elem::Array(intern_elem(e))),
             Type::Map(v) => Some(Elem::Map(intern_elem(v))),
             Type::Null => None,

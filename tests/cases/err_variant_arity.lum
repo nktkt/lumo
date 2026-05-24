@@ -1,0 +1,6 @@
+# E0104: バリアント構築のフィールド数が宣言と合わない。
+enum Pair { Of(int, int) }
+fn main() {
+    let p = Of(1);
+    return 0;
+}

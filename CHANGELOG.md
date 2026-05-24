@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.45.0]
+
+### Added
+
+- **Enums and pattern matching** ([RFC 0005](docs/rfcs/0005-enum-match.md)). Declare a sum type with `enum Name { Variant, Variant(T, ...), ... }`; each variant carries zero or more positional payloads, and a payload may reference the enum itself, so enums are **recursive** (trees, cons lists). Variant names are global, so you construct a value by naming the variant like a call — `Circle(2.0)`, `Cons(1, Nil)`, or bare `Unit`.
+- **`match` statement.** `match (scrutinee) { Pattern => body; ... }` dispatches on the variant and binds its payloads (`Rect(w, h) => ...`); `_` is a wildcard. An arm body is a single statement or a `{ ... }` block. Matching is **exhaustive** — every variant must be covered or a `_` must catch the rest (`E0209`), so adding a variant turns each now-incomplete `match` into a compile error instead of a silent runtime fall-through. Enums work as parameters, returns, struct fields, and array/map elements, may be `pub` across modules, and (like structs) are heap-allocated and reclaimed by the GC. See the new [`calc.lum`](examples/calc.lum) example — a recursive expression evaluator with a `Result`-style enum for safe division.
+
+### Notes
+
+- New diagnostics: `E0205` (matching a non-enum), `E0209` (non-exhaustive `match`), `E0303` (unknown/wrong-enum variant in a pattern), `E0204` (duplicate arm), `E0304` (duplicate variant name — variant names are globally unique), and `E0104` for wrong payload arity in construction or binding. Representation: each enum value is a heap record `{ i64 tag, slot×maxArity }`; `match` lowers to an LLVM `switch` on the tag.
+
 ## [0.44.0]
 
 ### Added

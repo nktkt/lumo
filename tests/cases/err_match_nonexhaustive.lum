@@ -1,0 +1,10 @@
+# E0209: match が全バリアントを処理していない（B が漏れている）。
+enum Color { R, G, B }
+fn main() {
+    let c = R;
+    match (c) {
+        R => print 1;
+        G => print 2;
+    }
+    return 0;
+}

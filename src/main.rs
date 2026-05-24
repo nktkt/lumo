@@ -65,6 +65,7 @@ fn load_module(
         )?;
     }
     merged.structs.extend(module.structs);
+    merged.enums.extend(module.enums);
     merged.funcs.extend(module.funcs);
     Ok(())
 }
@@ -79,7 +80,7 @@ fn import_err(msg: String, span: Option<Span>) -> Diagnostic {
 }
 
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.44");
+    eprintln!("Lumo compiler 0.45");
     eprintln!("使い方:");
     eprintln!("  lumo <command> [-O0|-O1|-O2|-O3] <file.lum>");
     eprintln!();
@@ -124,6 +125,7 @@ fn main() {
         let mut merged = Program {
             imports: Vec::new(),
             structs: Vec::new(),
+            enums: Vec::new(),
             funcs: Vec::new(),
         };
         let mut visited = HashSet::new();
@@ -134,6 +136,8 @@ fn main() {
             &mut visited,
             &mut merged,
         )?;
+        // ユーザー型注釈の Struct(n) のうち enum 名を Enum(n) に正規化する。
+        typeck::resolve_enum_types(&mut merged);
         typeck::check(&merged)?;
         cg.compile(&merged)
     })();
