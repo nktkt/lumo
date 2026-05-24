@@ -45,16 +45,21 @@ pub enum Tok {
     Star,
     Slash,
     Percent,
-    EqEq,     // ==
-    NotEq,    // !=
-    Lt,       // <
-    Le,       // <=
-    Gt,       // >
-    Ge,       // >=
-    Bang,     // !
-    AmpAmp,   // &&
-    PipePipe, // ||
-    Arrow,    // ->
+    PlusEq,    // +=
+    MinusEq,   // -=
+    StarEq,    // *=
+    SlashEq,   // /=
+    PercentEq, // %=
+    EqEq,      // ==
+    NotEq,     // !=
+    Lt,        // <
+    Le,        // <=
+    Gt,        // >
+    Ge,        // >=
+    Bang,      // !
+    AmpAmp,    // &&
+    PipePipe,  // ||
+    Arrow,     // ->
     Eof,
 }
 
@@ -225,6 +230,11 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                 ('&', '&') => Some(Tok::AmpAmp),
                 ('|', '|') => Some(Tok::PipePipe),
                 ('-', '>') => Some(Tok::Arrow),
+                ('+', '=') => Some(Tok::PlusEq),
+                ('-', '=') => Some(Tok::MinusEq),
+                ('*', '=') => Some(Tok::StarEq),
+                ('/', '=') => Some(Tok::SlashEq),
+                ('%', '=') => Some(Tok::PercentEq),
                 _ => None,
             };
             if let Some(kind) = kind {

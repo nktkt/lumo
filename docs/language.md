@@ -121,6 +121,24 @@ n = n + 1;   # ok: int = int
 # n = 2.0;   # error: cannot assign float to an int variable
 ```
 
+The **compound assignment** operators `+=`, `-=`, `*=`, `/=`, and `%=` are
+shorthand: `a OP= b` means `a = a OP b`. They work wherever plain `=` does — on
+variables, array elements (`a[i] += 1`), map values (`m[k] += 1`), and struct
+fields (`p.x *= 2`) — and follow the same type rules (so `+=` also concatenates
+strings, while `%=` is `int`-only).
+
+```lumo
+let n = 10;
+n += 5;      # 15
+n *= 2;      # 30
+let s = "a";
+s += "b";    # "ab"
+```
+
+(Because `a OP= b` expands to `a = a OP b`, the target `a` is evaluated twice; if
+an index or key sub-expression has side effects, those happen twice — so prefer
+side-effect-free targets, which is the usual case.)
+
 ### Scope
 
 Variables are **lexically block-scoped**: a `let` is visible only until the end

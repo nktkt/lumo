@@ -309,6 +309,11 @@ fn sorted_and_reversed() {
 }
 
 #[test]
+fn compound_assignment() {
+    run_ok("compound_assign");
+}
+
+#[test]
 fn slice_out_of_range_aborts() {
     run_err("slice_oob", "slice out of range");
 }

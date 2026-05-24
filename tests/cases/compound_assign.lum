@@ -1,0 +1,48 @@
+# Compound assignment: a OP= b  desugars to  a = a OP b.
+# Works on variables, array elements, map values, and struct fields.
+
+struct Counter { n: int }
+
+fn main() {
+    # variables, all five operators
+    let x = 10;
+    x += 5;  print x;          # 15
+    x -= 3;  print x;          # 12
+    x *= 2;  print x;          # 24
+    x /= 5;  print x;          # 4
+    x %= 3;  print x;          # 1
+
+    # floats
+    let f = 2.5;
+    f *= 2.0;  print f;        # 5
+    f += 0.5;  print f;        # 5.5
+    f -= 1.0;  print f;        # 4.5
+
+    # string concatenation with +=
+    let s = "ab";
+    s += "cd";  print s;       # abcd
+
+    # array element
+    let a = [1, 2, 3];
+    a[1] += 10;  print a[1];   # 12
+    a[0] *= 100; print a[0];   # 100
+
+    # map value
+    let m: {string: int} = {};
+    m["hits"] = 1;
+    m["hits"] += 41;  print m["hits"];   # 42
+
+    # struct field
+    let c = Counter { n: 0 };
+    c.n += 7;
+    c.n *= 6;
+    print c.n;                 # 42
+
+    # in a for-loop step and body
+    let sum = 0;
+    for (let i = 0; i < 5; i += 1) {
+        sum += i;
+    }
+    print sum;                 # 0+1+2+3+4 = 10
+    return 0;
+}

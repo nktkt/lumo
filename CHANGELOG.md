@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.34.0]
+
+### Added
+
+- **Compound assignment operators** `+=`, `-=`, `*=`, `/=`, `%=`. `a OP= b` is shorthand for `a = a OP b` and works on every assignment target — variables, array elements (`a[i] += 1`), map values (`m[k] += 1`), and struct fields (`p.x *= 2`). They follow the same type rules as the underlying operator, so `+=` also concatenates strings and `%=` is `int`-only.
+
+### Notes
+
+- Implemented by desugaring in the parser, so the target appears twice; a side-effecting index/key sub-expression is therefore evaluated twice (documented). All existing type checks and runtime behavior are reused unchanged.
+
 ## [0.33.0]
 
 ### Added
