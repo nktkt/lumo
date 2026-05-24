@@ -31,9 +31,9 @@ fn eval(expr: string) -> int {
 
 fn main() {
     let e1 = "3 4 + 5 *";                 # (3 + 4) * 5
-    print e1 + " = " + str(eval(e1));     # 35
+    print "{e1} = {eval(e1)}";            # 35  (string interpolation)
 
     let e2 = "100 2 / 3 -";               # (100 / 2) - 3
-    print e2 + " = " + str(eval(e2));     # 47
+    print "{e2} = {eval(e2)}";            # 47
     return 0;
 }

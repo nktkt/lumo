@@ -309,6 +309,16 @@ fn string_affix_predicates() {
 }
 
 #[test]
+fn string_interpolation() {
+    run_ok("interpolation");
+}
+
+#[test]
+fn interpolation_unclosed_errors() {
+    run_err("interp_unclosed", "E0004");
+}
+
+#[test]
 fn slice_and_pop() {
     run_ok("slice_pop");
 }

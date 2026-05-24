@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.42.0]
+
+### Added
+
+- **String interpolation.** A string literal may embed expressions in `{ }`: `"Hello, {name}! ({age + 1})"` desugars to `"Hello, " + str(name) + "! (" + str(age + 1) + ")"`. Write a literal brace as `{{` / `}}`. The embedded expression is type-checked and `str()`-converted like any other, so non-stringable types (arrays, maps, structs) are a clear `E0200`, and errors inside `{ }` point at the right place in the file. (v1 limitation: an interpolation expression can't itself contain a `"` or `{` — pull such values into a variable first.)
+
 ## [0.41.0]
 
 ### Added

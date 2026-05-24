@@ -1,0 +1,33 @@
+# String interpolation: "... {expr} ..." desugars to + str(expr).
+
+struct P { x: int, y: int }
+
+fn main() {
+    let name = "Ada";
+    let age = 36;
+
+    print "Hello, {name}! You are {age}.";   # Hello, Ada! You are 36.
+    print "{name}";                          # Ada   (whole string is one expr)
+    print "age={age}";                       # age=36 (expr at the end)
+
+    # arithmetic, calls, comparisons inside {}
+    print "sum = {age + 4}";                 # sum = 40
+    print "len = {len(name)}";               # len = 3
+    print "adult = {age >= 18}";             # adult = true
+
+    # float, array index, struct field
+    let ratio = 2.5;
+    print "ratio = {ratio}";                 # ratio = 2.5
+    let xs = [10, 20, 30];
+    print "first={xs[0]} last={xs[2]}";      # first=10 last=30
+    let p = P { x: 1, y: 2 };
+    print "point ({p.x}, {p.y})";            # point (1, 2)
+
+    # literal braces via {{ }}
+    print "set is {{1, 2, 3}}";              # set is {1, 2, 3}
+
+    # interpolation composes with + and escapes
+    let s = "[{age}]" + " tag\n";
+    print s + "done";                        # [36] tag / done
+    return 0;
+}

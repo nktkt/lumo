@@ -6,7 +6,7 @@
 
 use crate::ast::*;
 use crate::diagnostics::Diagnostic;
-use crate::lexer::{Tok, Token};
+use crate::lexer::{lex, Segment, Tok, Token};
 use crate::span::{FileId, Span};
 use crate::types::{intern, Type};
 
@@ -683,6 +683,68 @@ impl Parser {
         Ok(e)
     }
 
+    /// 補間文字列の構成片を `("lit" + str(expr) + "lit" + …)` という式に脱糖する。
+    /// typeck/codegen は通常の `+`/`str()` として扱うので追加変更は要らない。
+    fn desugar_interp(&self, segments: Vec<Segment>, span: Span) -> Result<Expr, Diagnostic> {
+        let mut acc: Option<Expr> = None;
+        for seg in segments {
+            let part = match seg {
+                Segment::Lit(s) => Expr {
+                    kind: ExprKind::Str(s),
+                    span,
+                },
+                Segment::Expr { src, offset } => {
+                    let inner = self.parse_interp_expr(&src, offset, span.file)?;
+                    let s = inner.span;
+                    Expr {
+                        kind: ExprKind::Call {
+                            name: "str".to_string(),
+                            args: vec![inner],
+                        },
+                        span: s,
+                    }
+                }
+            };
+            acc = Some(match acc {
+                None => part,
+                Some(a) => binary(BinOp::Add, a, part),
+            });
+        }
+        // segments は必ず Lit を含む（空でも Lit("")）ので acc は Some
+        Ok(acc.unwrap_or(Expr {
+            kind: ExprKind::Str(String::new()),
+            span,
+        }))
+    }
+
+    /// 補間 `{…}` の中の式ソースを再字句解析・再構文解析して 1 つの式にする。
+    /// トークンの span を `offset` だけずらし、エラーが元ファイルの正しい位置を指すようにする。
+    fn parse_interp_expr(
+        &self,
+        src: &str,
+        offset: usize,
+        file: FileId,
+    ) -> Result<Expr, Diagnostic> {
+        let mut toks = lex(src, file)?;
+        for t in &mut toks {
+            t.span.start += offset;
+            t.span.end += offset;
+        }
+        let mut p = Parser {
+            toks,
+            pos: 0,
+            last_end: 0,
+            file,
+        };
+        let e = p.parse_expr()?;
+        if p.peek() != &Tok::Eof {
+            return Err(Diagnostic::error("補間 {…} の中は 1 つの式にしてください")
+                .with_code("E0002")
+                .at(p.cur_span()));
+        }
+        Ok(e)
+    }
+
     fn parse_primary(&mut self) -> Result<Expr, Diagnostic> {
         let span = self.cur_span();
         match self.next().kind {
@@ -698,6 +760,8 @@ impl Parser {
                 kind: ExprKind::Str(s),
                 span,
             }),
+            // 補間文字列を `("lit" + str(expr) + "lit" + …)` に脱糖する
+            Tok::InterpStr(segments) => self.desugar_interp(segments, span),
             Tok::True => Ok(Expr {
                 kind: ExprKind::Bool(true),
                 span,
