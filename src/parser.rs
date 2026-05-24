@@ -337,16 +337,10 @@ impl Parser {
                 self.eat(&Tok::Semicolon)?;
                 StmtKind::Continue
             }
-            // 式から始まる文: `左辺値 = 式;`（代入）か、式文
+            // 式から始まる文: `左辺値 = 式;`（代入・複合代入）か、式文
             _ => {
                 let e = self.parse_expr()?;
-                let k = if self.peek() == &Tok::Assign {
-                    self.next();
-                    let value = self.parse_expr()?;
-                    StmtKind::Assign { target: e, value }
-                } else {
-                    StmtKind::ExprStmt(e)
-                };
+                let k = self.finish_assign_or_expr(e)?;
                 self.eat(&Tok::Semicolon)?;
                 k
             }
@@ -376,19 +370,50 @@ impl Parser {
             }
             _ => {
                 let e = self.parse_expr()?;
-                if self.peek() == &Tok::Assign {
-                    self.next();
-                    let value = self.parse_expr()?;
-                    StmtKind::Assign { target: e, value }
-                } else {
-                    StmtKind::ExprStmt(e)
-                }
+                self.finish_assign_or_expr(e)?
             }
         };
         Ok(Stmt {
             kind,
             span: Span::new(start, self.last_end),
         })
+    }
+
+    /// 左辺(式)を読んだ後、`=`・複合代入(`+= -= *= /= %=`)・式文のどれかを作る。
+    /// 複合代入 `a OP= b` は `a = a OP b` に脱糖する。左辺 `a` が2回現れるので、
+    /// 添字やキーに副作用のある式を書くとそれが2回評価される点に注意（通常は無害）。
+    fn finish_assign_or_expr(&mut self, e: Expr) -> Result<StmtKind, Diagnostic> {
+        let compound = match self.peek() {
+            Tok::PlusEq => Some(BinOp::Add),
+            Tok::MinusEq => Some(BinOp::Sub),
+            Tok::StarEq => Some(BinOp::Mul),
+            Tok::SlashEq => Some(BinOp::Div),
+            Tok::PercentEq => Some(BinOp::Mod),
+            _ => None,
+        };
+        if self.peek() == &Tok::Assign {
+            self.next();
+            let value = self.parse_expr()?;
+            Ok(StmtKind::Assign { target: e, value })
+        } else if let Some(op) = compound {
+            self.next();
+            let value = self.parse_expr()?;
+            let span = Span::new(e.span.start, self.last_end);
+            let combined = Expr {
+                kind: ExprKind::Binary {
+                    op,
+                    lhs: Box::new(e.clone()),
+                    rhs: Box::new(value),
+                },
+                span,
+            };
+            Ok(StmtKind::Assign {
+                target: e,
+                value: combined,
+            })
+        } else {
+            Ok(StmtKind::ExprStmt(e))
+        }
     }
 
     fn parse_expr(&mut self) -> Result<Expr, Diagnostic> {
