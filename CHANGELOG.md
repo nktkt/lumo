@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.40.0]
+
+### Added
+
+- **`pub` visibility** for modules ([RFC 0004](docs/rfcs/0004-module-visibility.md), the first half of module v2). Prefix a top-level `fn` or `struct` with `pub` to make it importable from other files. A new `E0106` is reported when code reaches a private item across files (functions, struct construction, and struct names in type annotations); reading the fields of a struct value you already hold is unrestricted.
+
+### Changed (BREAKING)
+
+- **Top-level items are now private to their file by default.** Under module v1 (v0.35) every imported `fn`/`struct` was public; now only `pub` items cross file boundaries. **Single-file programs are unaffected** (everything is same-file). Multi-file programs must add `pub` to the items they share — the bundled `tests/cases/import_*` and `examples/lib/mathx.lum` were updated accordingly. This is a one-time pre-1.0 break (per RFC 0004); name resolution is otherwise unchanged (names stay globally unique — no mangling yet).
+
 ## [0.39.0]
 
 ### Added

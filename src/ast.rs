@@ -163,6 +163,8 @@ pub struct Function {
     pub ret: Type,
     pub body: Vec<Stmt>,
     pub span: Span,
+    /// `pub fn` か（他ファイルから import 可能か）。省略時は false（ファイル private）。
+    pub is_pub: bool,
 }
 
 /// 構造体定義 `struct Name { f: T, ... }`
@@ -171,6 +173,8 @@ pub struct StructDef {
     pub name: String,
     pub fields: Vec<Param>,
     pub span: Span,
+    /// `pub struct` か（他ファイルから参照・生成可能か）。
+    pub is_pub: bool,
 }
 
 /// `import "path";` 宣言（ファイル先頭に置く）。パスは import する側のファイルからの相対。

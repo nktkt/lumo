@@ -8,28 +8,67 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::diagnostics::Diagnostic;
-use crate::span::Span;
+use crate::span::{FileId, Span};
 use crate::types::{intern, Type};
 
-/// 関数シグネチャ（引数の型と戻り値の型）
+/// 関数シグネチャ（引数・戻り値の型と、可視性のための定義ファイル・pub）
 struct Sig {
     params: Vec<Type>,
     ret: Type,
+    file: FileId,
+    is_pub: bool,
 }
 
-/// 構造体名 -> フィールド（定義順の (名前, 型)）
-type Structs = HashMap<String, Vec<(String, Type)>>;
+/// 構造体の情報（フィールドと、可視性のための定義ファイル・pub）
+struct StructInfo {
+    /// 定義順の (フィールド名, 型)
+    fields: Vec<(String, Type)>,
+    file: FileId,
+    is_pub: bool,
+}
 
-/// 型が実在する型を指すか検証する（構造体名が定義済みか。配列の要素も見る）。
-fn validate_type(t: Type, structs: &Structs, span: Span) -> Result<(), Diagnostic> {
+/// 構造体名 -> 情報
+type Structs = HashMap<String, StructInfo>;
+
+/// 別ファイルの private な項目を参照していないか検査する（RFC 0004）。
+/// 同一ファイル、または `pub` なら参照可。単一ファイルでは常に同一ファイルなので no-op。
+fn check_accessible(
+    kind: &str,
+    name: &str,
+    def_file: FileId,
+    is_pub: bool,
+    use_file: FileId,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if def_file != use_file && !is_pub {
+        return Err(Diagnostic::error(format!(
+            "{} {} はそのファイルの private です（他ファイルから使うには pub を付けてください）",
+            kind, name
+        ))
+        .with_code("E0106")
+        .at(span));
+    }
+    Ok(())
+}
+
+/// 型が実在し、かつ `use_file` から参照可能か検証する（構造体名・配列要素も再帰的に）。
+fn validate_type(
+    t: Type,
+    structs: &Structs,
+    use_file: FileId,
+    span: Span,
+) -> Result<(), Diagnostic> {
     match t {
-        Type::Struct(n) if !structs.contains_key(n) => {
-            return Err(Diagnostic::error(format!("不明な型: {}", n))
-                .with_code("E0300")
-                .at(span));
-        }
+        Type::Struct(n) => match structs.get(n) {
+            None => {
+                return Err(Diagnostic::error(format!("不明な型: {}", n))
+                    .with_code("E0300")
+                    .at(span));
+            }
+            Some(info) => check_accessible("構造体", n, info.file, info.is_pub, use_file, span)?,
+        },
         // 入れ子コレクションは内側の要素型まで再帰的に検証する（[[Point]] など）
-        Type::Array(e) | Type::Map(e) => validate_type(e.to_type(), structs, span)?,
+        Type::Array(e) | Type::Map(e) => validate_type(e.to_type(), structs, use_file, span)?,
         _ => {}
     }
     Ok(())
@@ -65,12 +104,19 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
             }
             fields.push((f.name.clone(), f.ty));
         }
-        structs.insert(s.name.clone(), fields);
+        structs.insert(
+            s.name.clone(),
+            StructInfo {
+                fields,
+                file: s.span.file,
+                is_pub: s.is_pub,
+            },
+        );
     }
-    // フィールドの型が実在する型を指すか検証
+    // フィールドの型が実在し、その構造体から参照可能か検証
     for s in &program.structs {
         for f in &s.fields {
-            validate_type(f.ty, &structs, f.span)?;
+            validate_type(f.ty, &structs, s.span.file, f.span)?;
         }
     }
 
@@ -93,14 +139,16 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
             );
         }
         for p in &f.params {
-            validate_type(p.ty, &structs, p.span)?;
+            validate_type(p.ty, &structs, f.span.file, p.span)?;
         }
-        validate_type(f.ret, &structs, f.span)?;
+        validate_type(f.ret, &structs, f.span.file, f.span)?;
         sigs.insert(
             f.name.clone(),
             Sig {
                 params: f.params.iter().map(|p| p.ty).collect(),
                 ret: f.ret,
+                file: f.span.file,
+                is_pub: f.is_pub,
             },
         );
     }
@@ -120,6 +168,7 @@ pub fn check(program: &Program) -> Result<(), Diagnostic> {
             scopes: vec![HashMap::new()],
             ret: f.ret,
             loops: 0,
+            cur_file: f.span.file,
         };
         for p in &f.params {
             // 同じスコープ内での重複だけをエラーにする
@@ -146,6 +195,8 @@ struct FnChecker<'a> {
     ret: Type,
     /// 入れ子になっているループの深さ（break/continue の検査用）
     loops: u32,
+    /// 検査中の関数が属するファイル（可視性チェックの「使う側」）
+    cur_file: FileId,
 }
 
 impl FnChecker<'_> {
@@ -198,14 +249,14 @@ impl FnChecker<'_> {
                         return Err(Diagnostic::error(what).with_code("E0206").at(value.span));
                     }
                     let a = ty.unwrap();
-                    validate_type(a, self.structs, stmt.span)?;
+                    validate_type(a, self.structs, self.cur_file, stmt.span)?;
                     self.declare(name, a);
                     return Ok(());
                 }
                 let t = self.check_expr(value)?;
                 let declared = match ty {
                     Some(a) => {
-                        validate_type(*a, self.structs, stmt.span)?;
+                        validate_type(*a, self.structs, self.cur_file, stmt.span)?;
                         // 初期値が注釈型に代入可能か（null は参照型に可）
                         if t != *a && !(t == Type::Null && a.is_reference()) {
                             return Err(Diagnostic::error(format!(
@@ -1068,6 +1119,8 @@ impl FnChecker<'_> {
                             .with_code("E0102")
                             .at(e.span)
                     })?;
+                    // 他ファイルの private 関数は呼べない（RFC 0004）
+                    check_accessible("関数", name, sig.file, sig.is_pub, self.cur_file, e.span)?;
                     (sig.params.clone(), sig.ret)
                 };
                 if param_types.len() != args.len() {
@@ -1178,11 +1231,21 @@ impl FnChecker<'_> {
                 }
             }
             ExprKind::StructLit { name, fields } => {
-                let def = self.structs.get(name).ok_or_else(|| {
+                let info = self.structs.get(name).ok_or_else(|| {
                     Diagnostic::error(format!("不明な構造体: {}", name))
                         .with_code("E0303")
                         .at(e.span)
                 })?;
+                // 他ファイルの private 構造体は生成できない（RFC 0004）
+                check_accessible(
+                    "構造体",
+                    name,
+                    info.file,
+                    info.is_pub,
+                    self.cur_file,
+                    e.span,
+                )?;
+                let def = &info.fields;
                 // フィールドの過不足・重複・型を検査する（出現順は問わない）
                 let mut seen: Vec<&str> = Vec::new();
                 for fi in fields {
@@ -1226,7 +1289,7 @@ impl FnChecker<'_> {
                 let obj_ty = self.check_expr(obj)?;
                 match obj_ty {
                     Type::Struct(sname) => {
-                        let def = self.structs.get(sname).unwrap();
+                        let def = &self.structs.get(sname).unwrap().fields;
                         def.iter()
                             .find(|(n, _)| n == field)
                             .map(|(_, t)| *t)

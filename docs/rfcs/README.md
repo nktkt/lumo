@@ -9,7 +9,7 @@ recommendation, and invites pushback **before** implementation begins.
 | [0001](0001-memory-model.md) | Memory-management strategy (arena vs GC vs ownership) | Proposed (draft) |
 | [0002](0002-map-type.md) | A built-in `map` (associative array) type | Implemented (v0.24.0) |
 | [0003](0003-module-system.md) | A module system (`import`) for multi-file programs | v1 implemented (v0.35.0) |
-| [0004](0004-module-visibility.md) | Module system v2: `pub` visibility and qualified imports | Proposed (draft) |
+| [0004](0004-module-visibility.md) | Module system v2: `pub` visibility and qualified imports | `pub` implemented (v0.40.0); qualified imports proposed |
 
 ## Process
 

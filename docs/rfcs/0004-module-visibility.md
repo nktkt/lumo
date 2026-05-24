@@ -1,6 +1,8 @@
 # RFC 0004 — Module system v2: `pub` visibility and qualified imports
 
-- **Status:** Proposed (draft).
+- **Status:** Partially implemented. **`pub` visibility shipped in `v0.40.0`**
+  (the no-mangling design below: private-by-default, same-file-or-`pub` access,
+  `E0106`). Qualified imports (`import "x" as x;`) remain proposed.
 - **Author:** Lumo contributors
 - **Created:** 2026-05-24
 - **Targets roadmap phase:** Phase 5 — Modules & packages (`v0.6`), the second

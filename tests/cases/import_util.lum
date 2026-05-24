@@ -1,2 +1,2 @@
 # Leaf module imported by import_main.lum (and, diamond-style, by import_helper.lum).
-fn doubled(n: int) -> int { return n * 2; }
+pub fn doubled(n: int) -> int { return n * 2; }

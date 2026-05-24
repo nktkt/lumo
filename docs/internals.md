@@ -315,7 +315,7 @@ error[E0101]: 未定義の変数: x
 |----------|---------------------------|-----------------------------------------------------|
 | `E000x`  | lexing                    | `E0001` illegal character, `E0003` bad number       |
 | `E0002`  | parsing                   | unexpected token / syntax error                     |
-| `E01xx`  | names / arity / modules   | `E0100` no `main`, `E0101` undefined var, `E0102` undefined fn, `E0103` duplicate fn, `E0104` wrong arity, `E0105` import not found |
+| `E01xx`  | names / arity / modules   | `E0100` no `main`, `E0101` undefined var, `E0102` undefined fn, `E0103` duplicate fn, `E0104` wrong arity, `E0105` import not found, `E0106` private item used across files |
 | `E02xx`  | types                     | `E0200` type mismatch, `E0201` non-bool condition, `E0202` wrong return type |
 | `E03xx`  | type annotations          | `E0300` unknown type, `E0301` duplicate parameter   |
 

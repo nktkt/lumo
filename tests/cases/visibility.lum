@@ -1,0 +1,8 @@
+import "vis_lib.lum";
+
+fn main() {
+    print boosted(4);          # scale(4)+1 = 41
+    let b = Boxed { v: 9 };    # pub struct
+    print b.v;                 # 9
+    return 0;
+}
