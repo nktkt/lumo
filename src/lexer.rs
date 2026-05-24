@@ -138,7 +138,11 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
                                 other
                             ))
                             .with_code("E0004")
-                            .at(Span::new(file, esc_start, byte_at(&chars, src, i + 1))));
+                            .at(Span::new(
+                                file,
+                                esc_start,
+                                byte_at(&chars, src, i + 1),
+                            )));
                         }
                     };
                     s.push(decoded);
