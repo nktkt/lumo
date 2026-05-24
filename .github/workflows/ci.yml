@@ -51,6 +51,18 @@ jobs:
           sudo apt-get install -y llvm-22-dev libpolly-22-dev
           echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> "$GITHUB_ENV"
 
+      # Boehm GC (bdw-gc): build.rs links the compiler against it so the JIT can
+      # resolve GC_malloc/GC_realloc/GC_init from the process (RFC 0001).
+      - name: Install Boehm GC (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install bdw-gc
+          echo "PKG_CONFIG_PATH=$(brew --prefix bdw-gc)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+
+      - name: Install Boehm GC (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libgc-dev
+
       - name: Format check
         run: cargo fmt --all -- --check
 

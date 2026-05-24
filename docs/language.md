@@ -59,8 +59,8 @@ between numbers explicitly, use the [`int()` / `float()` built-ins](#conversions
 build new ones: `+` **concatenates** two strings into a fresh heap string, and
 all comparisons (`== != < <= > >=`) work on strings — `==`/`!=` by value and the
 ordering operators lexicographically (by byte). Concatenated strings are
-heap-allocated and currently reclaimed only at program exit; see
-[RFC 0001](rfcs/0001-memory-model.md) for the planned memory management.
+heap-allocated and reclaimed automatically by the garbage collector; see
+[RFC 0001](rfcs/0001-memory-model.md) for the memory model.
 
 You can read individual bytes with `s[i]`, which returns the i-th byte as an
 `int` (0–255), bounds-checked like an array. `len(s)` gives the byte length.
@@ -469,8 +469,8 @@ Under the hood an array is a small header `{len, cap, data}`; `push` doubles the
 array value points to, growth stays visible through every alias of the array —
 `let b = a; a = push(a, x);` leaves `b` seeing the new element too.
 
-Arrays are heap-allocated and, like concatenated strings, are currently
-reclaimed only at program exit — see [RFC 0001](rfcs/0001-memory-model.md).
+Arrays are heap-allocated and, like all heap data, reclaimed automatically by the
+garbage collector — see [RFC 0001](rfcs/0001-memory-model.md).
 Indexing is **bounds-checked**: an out-of-range index (including a negative one)
 prints `lumo: index out of bounds` to stderr and exits with status 101.
 
@@ -571,7 +571,8 @@ let ks = keys(counts);      # ["a", "b"] in some order
 Maps are backed by a separately-chained hash table (FNV-1a hashing) that grows
 automatically — when the load factor exceeds 0.75 the bucket array is rehashed
 into one twice as large, so lookups stay near O(1) as the map fills. Entries —
-like all heap data — are reclaimed only at program exit (RFC 0001).
+like all heap data — are reclaimed automatically by the garbage collector
+(RFC 0001).
 
 ## Nested collections
 
@@ -649,7 +650,8 @@ struct Rect { lo: Point, hi: Point }   # structs can contain structs
 
 Structs are heap-allocated and assigned by reference (two variables bound to the
 same struct value alias the same data). Like other heap values they are
-reclaimed only at program exit; see [RFC 0001](rfcs/0001-memory-model.md). An
+reclaimed automatically by the garbage collector; see
+[RFC 0001](rfcs/0001-memory-model.md). An
 array of structs (`[Point]`) is allowed; indexing yields the struct, so
 `ps[i].x` reads and `ps[i].x = v;` mutates it in place.
 

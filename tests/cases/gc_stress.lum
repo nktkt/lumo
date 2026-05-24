@@ -1,0 +1,14 @@
+# Allocation churn: build and discard ~200k short-lived arrays, keeping only a
+# running total. Correct output proves the GC reclaims without breaking
+# behavior; peak memory stays small (a leaking allocator would balloon).
+fn main() {
+    let total = 0;
+    for (let i = 0; i < 200000; i = i + 1) {
+        let xs: [int] = [];
+        xs = push(xs, i);
+        xs = push(xs, i + 1);
+        total = total + xs[0] + xs[1];
+    }
+    print total;        # sum of (i + i+1) for i in 0..200000 = 40000000000
+    return 0;
+}
