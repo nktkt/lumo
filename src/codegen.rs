@@ -29,6 +29,14 @@ use crate::ast::*;
 use crate::diagnostics::Diagnostic;
 use crate::types::{intern, Type};
 
+extern "C" {
+    /// Boehm GC の初期化。`jit_run` から呼ぶことで (1) Rust 側から GC シンボルを
+    /// 参照し、リンカの `--as-needed` が libgc を落とさないようにし、(2) GC を実
+    /// プロセスのスタック上で初期化する。冪等。
+    #[link_name = "GC_init"]
+    fn gc_init();
+}
+
 /// libc の `stdin` (FILE*) のシンボル名。macOS では `__stdinp`、それ以外は `stdin`。
 /// ホスト向けにしかコンパイルしないので、コンパイル時の cfg で正しく選べる。
 fn stdin_symbol() -> &'static str {
@@ -5302,6 +5310,15 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// JIT で main を即時実行し、終了コードを返す
     pub fn jit_run(&self) -> Result<i64, String> {
+        // Boehm GC をここ（実プロセスのスタック上）で初期化する。これは2つ効く:
+        // (1) GC_init を Rust から参照することで、リンカの --as-needed が
+        //     libgc を落とさない（JIT 生成コードしか GC_* を呼ばないため、参照が
+        //     無いと Linux で libgc が外され、JIT が GC_malloc を解決できず落ちる）。
+        // (2) スタック基準を実 main のフレームに固定し、根の走査を正しくする。
+        // GC_init は冪等なので生成コード側の呼び出しと重複しても問題ない。
+        unsafe {
+            gc_init();
+        }
         Target::initialize_native(&InitializationConfig::default())?;
         let ee = self
             .module
