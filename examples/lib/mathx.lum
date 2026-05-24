@@ -1,0 +1,15 @@
+# A small imported helper library — no `main`, only used via
+# `import "lib/mathx.lum"`. See examples/use_mathx.lum.
+
+fn gcd(a: int, b: int) -> int {
+    while (b != 0) {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
+fn lcm(a: int, b: int) -> int {
+    return a / gcd(a, b) * b;
+}

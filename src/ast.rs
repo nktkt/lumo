@@ -166,9 +166,19 @@ pub struct StructDef {
     pub span: Span,
 }
 
-/// プログラム全体（構造体定義と関数の集まり）
+/// `import "path";` 宣言（ファイル先頭に置く）。パスは import する側のファイルからの相対。
+#[derive(Debug, Clone)]
+pub struct ImportDecl {
+    pub path: String,
+    pub span: Span,
+}
+
+/// 1ファイルを解析した結果（import 宣言・構造体定義・関数の集まり）。
+/// ドライバが import を解決し、全ファイルの structs/funcs を1つに統合してから
+/// typeck/codegen に渡す（それらは `imports` を見ない）。
 #[derive(Debug, Clone)]
 pub struct Program {
+    pub imports: Vec<ImportDecl>,
     pub structs: Vec<StructDef>,
     pub funcs: Vec<Function>,
 }

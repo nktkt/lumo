@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.35.0]
+
+### Added
+
+- **Module system (`import`)** — multi-file Lumo programs ([RFC 0003](docs/rfcs/0003-module-system.md) v1). A file may begin with `import "relative/path.lum";` statements; the path is resolved relative to the importing file and every imported file's top-level `struct`s and `fn`s become visible (flat namespace). Each file is loaded **once** (dedup by canonical path), so diamond imports collapse and import cycles terminate. A missing import reports `E0105` at the `import` line, and — thanks to the v0.34.1 source map — an error *inside* an imported file now renders against that file.
+- `examples/use_mathx.lum` + `examples/lib/mathx.lum`: a `main` that imports a helper library.
+
+### Notes
+
+- v1 is deliberately minimal: flat namespace (name collisions across files are duplicate-definition errors), everything public, one merged LLVM module. Qualified imports and `pub` visibility are future work (RFC 0003 v2). `import` must appear at the top of a file.
+
 ## [0.34.1]
 
 ### Changed

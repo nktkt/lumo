@@ -13,12 +13,73 @@ mod span;
 mod typeck;
 mod types;
 
+use ast::Program;
 use diagnostics::Diagnostic;
-use span::SourceMap;
+use span::{SourceMap, Span};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 
+/// `import` を再帰的に解決し、全ファイルの structs/funcs を `merged` に統合する。
+///
+/// 各ファイルは canonical path で一度だけ読み込む（ダイヤモンド import を1回に畳み、
+/// 循環があっても終了する）。import は post-order で処理する（依存を先に積む）ので、
+/// 統合後の順序は「依存 → それを使う側」になる。`import_span` はこのファイルを引き込んだ
+/// `import` 文の位置で、読み込み失敗をその行で報告するために使う（ルートは `None`）。
+fn load_module(
+    path: &Path,
+    import_span: Option<Span>,
+    sources: &mut SourceMap,
+    visited: &mut HashSet<PathBuf>,
+    merged: &mut Program,
+) -> Result<(), Diagnostic> {
+    let canon = std::fs::canonicalize(path).map_err(|e| {
+        import_err(
+            format!("import 先が見つかりません {}: {}", path.display(), e),
+            import_span,
+        )
+    })?;
+    // 既に読み込み済みなら何もしない（重複排除・循環安全）。
+    if !visited.insert(canon.clone()) {
+        return Ok(());
+    }
+    let src = std::fs::read_to_string(&canon).map_err(|e| {
+        import_err(
+            format!("ファイルを読めません {}: {}", canon.display(), e),
+            import_span,
+        )
+    })?;
+    let fid = sources.add(canon.display().to_string(), src);
+    let tokens = lexer::lex(&sources.get(fid).src, fid)?;
+    let module = parser::parse(tokens)?;
+
+    // import を先に解決（依存を先に積む post-order）。パスは自分のあるディレクトリ基準。
+    let dir = canon.parent().map(Path::to_path_buf).unwrap_or_default();
+    for imp in &module.imports {
+        load_module(
+            &dir.join(&imp.path),
+            Some(imp.span),
+            sources,
+            visited,
+            merged,
+        )?;
+    }
+    merged.structs.extend(module.structs);
+    merged.funcs.extend(module.funcs);
+    Ok(())
+}
+
+/// import 解決の失敗を診断にする。span があればその `import` 文を指す。
+fn import_err(msg: String, span: Option<Span>) -> Diagnostic {
+    let d = Diagnostic::error(msg).with_code("E0105");
+    match span {
+        Some(s) => d.at(s),
+        None => d,
+    }
+}
+
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.34.1");
+    eprintln!("Lumo compiler 0.35");
     eprintln!("使い方:");
     eprintln!("  lumo <command> [-O0|-O1|-O2|-O3] <file.lum>");
     eprintln!();
@@ -53,24 +114,28 @@ fn main() {
     };
     let cmd = cmd.as_str();
 
-    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        eprintln!("ファイルを読めません {}: {}", path, e);
-        exit(1);
-    });
-
-    // ソースマップに登録。複数ファイル対応時はここに import 先も足していく。
+    // ルートから import を辿って全ファイルを読み込み、1つの Program に統合する。
+    // エラーは位置付き診断として（import 先のファイルでも正しい位置で）表示する。
     let mut sources = SourceMap::new();
-    let fid = sources.add(path.clone(), src);
-
-    // 字句解析・構文解析・型検査・コード生成。エラーは位置付き診断として表示する。
     let context = inkwell::context::Context::create();
     let mut cg = codegen::CodeGen::new(&context, "lumo");
 
     let compiled: Result<(), Diagnostic> = (|| {
-        let tokens = lexer::lex(&sources.get(fid).src, fid)?;
-        let program = parser::parse(tokens)?;
-        typeck::check(&program)?;
-        cg.compile(&program)
+        let mut merged = Program {
+            imports: Vec::new(),
+            structs: Vec::new(),
+            funcs: Vec::new(),
+        };
+        let mut visited = HashSet::new();
+        load_module(
+            Path::new(&path),
+            None,
+            &mut sources,
+            &mut visited,
+            &mut merged,
+        )?;
+        typeck::check(&merged)?;
+        cg.compile(&merged)
     })();
 
     if let Err(diag) = compiled {

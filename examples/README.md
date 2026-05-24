@@ -63,4 +63,5 @@ Listed from simplest to most advanced:
 | [`tags.lum`](tags.lum) | String methods — `split` a messy tag list, then `trim` + `to_lower` each piece, and answer membership (`==`) and substring (`contains`) queries. |
 | [`slug.lum`](slug.lum) | String rewriting — `replace` to swap spaces/strip punctuation and `repeat` to draw a title underline, building a "slugify" routine with `trim` + `to_lower`. |
 | [`rpn.lum`](rpn.lum) | Stack operations — `push`/`pop` to evaluate reverse-Polish-notation expressions, tokenized with `split` and parsed with `is_int`/`int`. |
+| [`use_mathx.lum`](use_mathx.lum) | Modules — `import "lib/mathx.lum"` pulls in a helper library (`gcd`/`lcm`) from a sibling file and calls its functions. |
 | [`leaderboard.lum`](leaderboard.lum) | Array ordering — `sorted` / `reversed` (non-mutating) with slicing to rank scores and take the top 3. |
