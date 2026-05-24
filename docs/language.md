@@ -712,7 +712,7 @@ if (is_int(s)) {
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`, `pop`,
 `sorted`, `reversed`, `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`,
 `keys`, `delete`, `substr`, `split`, `join`, `is_int`, `is_float`, `read_file`,
-`write_file`, `to_upper`, `to_lower`, `trim`, `find`, `contains`, `starts_with`,
+`write_file`, `append_file`, `to_upper`, `to_lower`, `trim`, `find`, `contains`, `starts_with`,
 `ends_with`, `replace`, `repeat`, `panic`, and `assert` are reserved names — you
 cannot define a function with one of them.
 
@@ -755,13 +755,15 @@ while (line != null) {
 
 (Lines longer than 4095 bytes come back in chunks.)
 
-### `read_file` / `write_file`
+### `read_file` / `write_file` / `append_file`
 
 Whole-file I/O for persisting state between runs:
 
 - **`write_file(path, content)`** writes the `string` `content` to the file at
   `path`, **replacing** any existing contents, and returns a `bool` — `true` on
   success, `false` if the file could not be opened or the write was short.
+- **`append_file(path, content)`** is like `write_file` but **appends** to the
+  end (creating the file if absent) instead of truncating — handy for logs.
 - **`read_file(path)`** returns the file's entire contents as a `string`, or
   `null` if it cannot be opened. As with `read_line`, guard the result against
   `null` before using it.

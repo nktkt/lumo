@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.41.0]
+
+### Added
+
+- **`append_file(path, content)`** — appends `content` to a file (creating it if absent) instead of truncating, completing the file-I/O trio with `read_file`/`write_file`. Returns a `bool` like `write_file`. Useful for logs and accumulating output across runs.
+
 ## [0.40.0]
 
 ### Added

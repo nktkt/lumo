@@ -1,6 +1,6 @@
 [package]
 name = "lumo"
-version = "0.40.0"
+version = "0.41.0"
 edition = "2021"
 description = "Lumo - a tiny programming language compiled with LLVM"
 

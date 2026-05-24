@@ -1,0 +1,21 @@
+# append_file(path, content): append to a file (creating it if absent), like
+# write_file but without truncating. Completes the file-I/O trio.
+
+fn main() {
+    let path = "/tmp/lumo_test_append_file.txt";
+
+    # start fresh, then append two more lines
+    write_file(path, "line1\n");
+    print append_file(path, "line2\n");   # true
+    print append_file(path, "line3\n");   # true
+    print read_file(path);                # line1 / line2 / line3
+
+    # append also creates the file when it does not exist yet
+    let fresh = "/tmp/lumo_test_append_fresh.txt";
+    write_file(fresh, "");                # ensure empty/clean start
+    append_file(fresh, "a");
+    append_file(fresh, "b");
+    append_file(fresh, "c");
+    print read_file(fresh);               # abc
+    return 0;
+}
