@@ -1,15 +1,23 @@
 # RFC 0001 — Memory-Management Strategy for Lumo
 
-- **Status:** Proposed (Draft for discussion)
+- **Status:** **Decided (revised 2026-05-24).** The original draft recommended
+  "arena-first, reclamation-deferred," which shipped as a never-free
+  `lumo_alloc` (a malloc wrapper). With heap strings, growable arrays, maps, and
+  structs all in the language now — and a *scalable* product as the goal — the
+  deferred question is due. **Decision: adopt the Boehm–Demers–Weiser
+  conservative garbage collector for v1 reclamation** (see
+  [Decision](#decision-2026-05-24-revision)). The original option analysis below
+  is preserved for context; the [Recommendation](#recommendation) it reached is
+  **superseded** by the Decision.
 - **Author:** Lumo contributors
-- **Created:** 2026-05-21
+- **Created:** 2026-05-21 (revised 2026-05-24)
 - **Targets roadmap phase:** Phase 4 — Memory & runtime (`v0.5`)
 - **Tracking issue:** _TBD_
 
-> **This is a request for comments, not a settled decision.** Nothing here is final.
-> The goal is to lay out the design space honestly, make a concrete *recommendation*,
-> and give reviewers enough to push back. Concerns, counter-proposals, and
-> benchmarks are all welcome — please comment inline or in the tracking issue.
+> **The decision below is settled; the rest is the analysis that led to it.** The
+> original draft laid out five strategies and ranked an arena first. This revision
+> records the actual call now that the language has matured past the point where
+> "reclaim at exit" is acceptable.
 
 ---
 
@@ -28,11 +36,89 @@ types — Lumo must allocate, track, and reclaim dynamically-sized memory.
 
 This RFC analyzes five strategies (manual `alloc`/`free`, arena/region
 allocation, automatic reference counting, tracing GC, and Rust-style
-ownership/borrowing) and **recommends a pragmatic, incremental path**: ship a
-*minimal runtime with a bump/arena allocator* to unblock heap strings and arrays
-**now**, deliberately deferring reclamation in the first cut, while treating
-**compile-time ownership** as a long-term research track that the recommendation
-is structured *not to foreclose*.
+ownership/borrowing). The original draft **recommended a pragmatic, incremental
+path**: ship a *minimal runtime with a bump/arena allocator* to unblock heap
+strings and arrays **now**, deferring reclamation. That shipped (as a never-free
+`lumo_alloc`). The **2026-05-24 Decision below** now resolves the deferred
+reclamation question.
+
+---
+
+## Decision (2026-05-24 revision)
+
+**Adopt the Boehm–Demers–Weiser conservative garbage collector (`libgc`) as
+Lumo's v1 memory-reclamation strategy.** Concretely: `lumo_alloc` calls
+`GC_malloc` instead of `malloc`, the growth paths (`push`, map resize) call
+`GC_realloc`, and the collector reclaims unreachable objects automatically by
+conservatively scanning the stack and heap. This is **Option D1** from the
+analysis below, chosen now over the originally-ranked arena (Option B).
+
+### Why this, why now
+
+The original RFC explicitly said the arena-first call would flip *"if Lumo's
+first real users run long-lived servers — program-lifetime arenas are
+unacceptable and the calculus shifts toward Boehm GC now."* We are there:
+
+- **The leak is real and total.** `lumo_alloc` is a `malloc` wrapper that never
+  frees. Every concatenated string, `push`, `substr`/`split`/`replace`, `sorted`,
+  `map` insert, `read_line`, and `read_file` leaks for the life of the process. A
+  `while (line != null)` loop over a large input grows without bound. For a
+  *scalable* product this is the single most important gap.
+- **The other options don't fit or are too large, here and now:**
+  - *Arena/regions (B):* a process-lifetime arena reclaims no better than the
+    current never-free malloc. Real reclamation needs **scoped regions + escape
+    analysis**, and the growth model (`push`/map resize via `realloc`, returning a
+    stable header) does not map cleanly onto bump arenas. Significant front-end
+    work for partial reclamation.
+  - *ARC (C):* pervasive retain/release insertion across all control flow, a
+    per-type drop story, and **cycles leak** without an added cycle collector.
+  - *Custom precise GC (D2):* Lumo's heap is **many small allocations** with
+    indirection — an array is a `{len,cap,data}` header *plus* a separate data
+    block; a map is a header *plus* a bucket array *plus* per-entry nodes. A
+    precise collector needs per-kind layout descriptors and a root map
+    (stack maps / shadow stack) for all of these. Large and correctness-critical.
+  - *Ownership/borrowing (E):* a borrow checker is a research track, not a step.
+- **Boehm is the only option that is both *real reclamation* (including cycles)
+  and *tractable*.** It needs **no object headers, no shadow stack, and no layout
+  descriptors** — it scans conservatively. Integration is essentially "swap the
+  allocator," which fits the existing malloc-based runtime with near-zero codegen
+  change. It handles Lumo's layouts correctly: every value reference points at a
+  block start (the array/map/string/struct base), the header→data and
+  bucket→entry pointers are ordinary words the collector traces, and Boehm's
+  default interior-pointer support covers the transient `data + 8*i` pointers that
+  indexing forms on the stack.
+
+### Trade-offs accepted
+
+- **A dependency.** `libgc` (bdw-gc) is not currently installed; it must be added
+  locally and in CI (`apt-get install libgc-dev` on Ubuntu, `brew install bdw-gc`
+  on macOS). The project already depends on LLVM 22, so one more well-established
+  system library is in keeping.
+- **Conservative & non-moving.** May occasionally retain garbage that looks like a
+  pointer, and cannot compact. Acceptable for Lumo's scale; precise/moving GC
+  stays a future option (D2) and the door to ownership (E) is not *architecturally*
+  closed (the value model is unchanged).
+- **GC pauses / nondeterminism.** Fine for the CLI/batch/scripting workloads Lumo
+  targets today. `lumo_alloc` remains the single allocation chokepoint, so the
+  strategy can be swapped again later behind that boundary.
+
+### How it integrates
+
+- **JIT (`lumo run`):** the JIT resolves runtime symbols (`printf`, `malloc`, …)
+  from the host process. Link the `lumo` compiler binary against `libgc` (a
+  `build.rs` emitting `cargo:rustc-link-lib=gc` + the search path) so `GC_malloc`
+  / `GC_realloc` / `GC_init` are present in the process and resolvable by the JIT,
+  exactly as libc symbols are today.
+- **Native (`lumo build`):** the `clang` link step adds `-lgc` (and the library
+  search path) so produced executables carry the collector.
+- **Startup:** call `GC_init` once at the top of generated `main` (Boehm also
+  lazily self-initializes on first `GC_malloc`, but an explicit init is clearer
+  and pins the stack base).
+- **Allocator:** `declare_runtime` declares `GC_malloc`/`GC_realloc` and defines
+  `lumo_alloc` as a thin `GC_malloc` wrapper; the two `realloc` call sites (`push`
+  grow, `lumo_map_resize`) switch to `GC_realloc`. No other codegen changes.
+
+The [Phased rollout plan](#phased-rollout-plan) below is updated to these steps.
 
 ---
 
@@ -334,7 +420,13 @@ language, with a real learning curve. Powerful long-term, premature now.
 
 ## Recommendation
 
-**Recommend (for discussion): a phased "arena-first, ownership-later" path.**
+> **⚠️ Superseded by the [Decision (2026-05-24 revision)](#decision-2026-05-24-revision).**
+> The arena-first recommendation below was the original call; it shipped as a
+> never-free allocator and is now replaced by adopting the Boehm conservative GC.
+> The reasoning is kept for the historical record and because the option
+> comparison remains useful.
+
+**Original recommendation (for discussion): a phased "arena-first, ownership-later" path.**
 
 1. **Now (Phase 4 first cut): build a minimal runtime around an arena / bump
    allocator.** Heap strings and dynamic arrays allocate from a process-lifetime
@@ -442,62 +534,51 @@ first step*, and ranks B over D1 for the first step. Additional alternatives:
 
 ## Phased rollout plan
 
-This maps onto roadmap **Phase 4 (Memory & runtime, `v0.5`)**, and its first
-deliverables can begin during **Phase 2/3** because the early steps don't depend
-on the type checker.
+> Updated for the Decision (Boehm GC). Steps 0–3 and the struct/heap work of the
+> *original* plan already shipped (heap strings, growable arrays, maps, structs)
+> on the never-free `lumo_alloc`. What remains is turning on reclamation.
 
-- **Step 0 — Minimal runtime / stdlib boundary.** Introduce a real runtime
-  artifact and a defined boundary, replacing the ad-hoc external `printf` with a
-  small set of runtime symbols (`lumo_alloc`, the allocator state,
-  `print`/`println`). This is already listed as a Phase 4 task ("replace ad-hoc
-  `printf` with a real runtime/stdlib boundary"). *Lands first.*
-- **Step 1 — Bump/arena allocator + heap representation.** A process-lifetime
-  arena behind `lumo_alloc(size, align)`. Define the in-memory layout for
-  heap-backed values (`{ ptr, len, cap }`) and teach codegen to build them.
-  Extend the value model so `(BasicValueEnum, Type)` can carry heap types (the
-  `BasicValueEnum` becomes an aggregate or a pointer to one); `typeck` learns the
-  new types but makes no lifetime claims yet.
-- **Step 2 — Heap strings.** Make `string` heap-capable: a `Str` value gains an
-  allocated form alongside the existing global-constant-literal form, enabling
-  concatenation (`+`) and a string builder. Literals can stay as global constants
-  (a fast path); only computed strings allocate. *First user-visible win.*
-- **Step 3 — Dynamic arrays / lists.** A growable `array`/`list` over the arena
-  with `push`, indexing, and `len` (the roadmap's `len` built-in). Reuse the
-  `{ ptr, len, cap }` layout and the allocator from Step 1.
-- **Step 4 — Scoped regions.** Add `region { ... }` (or per-call arenas) so
-  memory is reclaimed before program exit. Requires a small lifetime/escape rule
-  in `typeck` to prevent region-local references from escaping.
-- **Step 5 — Aggregate types (`struct`s) on the heap.** Once Phase 3 structs
-  exist, allow heap-allocated aggregates using the same machinery; this is where
-  a `drop`/cleanup story starts to matter and where the ownership research track
-  feeds back in.
-- **Parallel research track (non-blocking) — ownership & borrowing.** Prototype a
-  borrow checker and ownership analysis against the typed HIR. If/when it
-  matures, a follow-up RFC proposes promoting it to the primary model, with
-  arenas demoted to an optimization. This is the path to the "fast, GC-free
-  systems language" endgame and to clean concurrency (Phase 10).
+- **Step 1 — Build integration.** Add `libgc` to the toolchain: a `build.rs`
+  linking the `lumo` binary against `gc` (so the JIT can resolve `GC_*` from the
+  process), the `clang` link step gaining `-lgc` for native builds, and CI
+  installing bdw-gc (`libgc-dev` on Ubuntu, `bdw-gc` on macOS). De-risk: confirm
+  `GC_malloc` resolves in both JIT and native before touching the allocator.
+- **Step 2 — Swap the allocator.** `declare_runtime` declares `GC_malloc`,
+  `GC_realloc`, `GC_init`; `lumo_alloc` becomes a `GC_malloc` wrapper; the `push`
+  grow path and `lumo_map_resize` switch their `realloc` to `GC_realloc`; emit a
+  `GC_init` call at the top of generated `main`. **This is the step that makes
+  memory actually get reclaimed.** No layout, value-model, or `typeck` changes.
+- **Step 3 — Prove it.** Tests that allocate unboundedly in a loop (e.g. millions
+  of `push`/concat/`read_line` iterations) must run in **bounded** resident
+  memory rather than growing without limit — the concrete "no leaks" check the
+  original exit criterion deferred. Keep the existing golden tests green
+  (behavior must be identical).
+- **Later (optional) — precise / moving GC (D2)** if conservatism or pause
+  behavior ever bites, and the **ownership research track (E)** remains open as
+  the long-term "GC-free systems language" endgame; both live behind the
+  unchanged `lumo_alloc` boundary, so swapping is localized.
 
-Each step ships with golden-file tests and (per the roadmap's quality track)
-sanitizer runs in CI, so we can prove "programs that allocate run without
-crashes/UB under the chosen model" — the stated Phase 4 exit criterion. (Note:
-"without leaks" in the exit criterion is satisfied only at program exit until
-Step 4 lands; we should be explicit about that in the milestone.)
+This completes roadmap **Phase 4 (Memory & runtime)**'s reclamation goal: with the
+GC, "programs that allocate and free memory run without leaks" holds at runtime,
+not just at program exit.
 
 ---
 
 ## Unresolved questions
 
-1. **Arena vs. Boehm GC for the very first step.** The central question for
-   reviewers. Is avoiding a runtime dependency + GC pauses + lock-in worth giving
-   up cycle-safe automatic reclamation in v1?
-2. **Is ownership truly the endgame, or is a precise GC acceptable forever?** This
-   determines how hard we guard against ABI lock-in now (R3).
-3. **What is the heap value representation?** `{ ptr, len, cap }` by value, or a
-   pointer to a heap header? This affects calling convention, FFI (R7), and how
-   much `BasicValueEnum` aggregates we push around.
-4. **How does the allocator reach codegen?** A global/thread-local allocator, or
-   an explicit allocator handle threaded through calls (the latter is friendlier
-   to regions and to a future ownership/no-global-state model)?
+1. ~~**Arena vs. Boehm GC for the very first step.**~~ **Resolved (2026-05-24):**
+   Boehm GC — see the [Decision](#decision-2026-05-24-revision). Real users /
+   long-running programs make cycle-safe automatic reclamation worth the
+   dependency.
+2. **Is ownership truly the endgame, or is a precise GC acceptable forever?** Left
+   open; the GC is behind the `lumo_alloc` boundary, so this stays revisable (R3).
+3. **GC tuning.** Should generated `main` call `GC_init` explicitly (clearer,
+   pins the stack base) or rely on lazy self-init? Do we ever need
+   `GC_set_*` knobs, or `GC_malloc_atomic` for pointer-free blocks (string/`[int]`
+   data) as an optimization? Treated as follow-ups, not blockers.
+4. **JIT root scanning.** Confirm Boehm correctly finds roots on the stack of the
+   JIT-invoked `main` across platforms (it does in the common single-threaded
+   case; the Step 1 de-risk check verifies this before committing).
 5. **String literals: keep the global-constant fast path?** Almost certainly yes,
    but we need a clean way for a `Str` value to be *either* a global literal or an
    arena-allocated buffer without two separate types in `typeck`.
