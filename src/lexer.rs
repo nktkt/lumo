@@ -61,6 +61,12 @@ pub enum Tok {
     AmpAmp,    // &&
     PipePipe,  // ||
     Arrow,     // ->
+    Amp,       // &  (ビット AND)
+    Pipe,      // |  (ビット OR)
+    Caret,     // ^  (ビット XOR)
+    Tilde,     // ~  (ビット NOT)
+    Shl,       // << (左シフト)
+    Shr,       // >> (右シフト)
     Eof,
 }
 
@@ -241,6 +247,8 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
                 ('*', '=') => Some(Tok::StarEq),
                 ('/', '=') => Some(Tok::SlashEq),
                 ('%', '=') => Some(Tok::PercentEq),
+                ('<', '<') => Some(Tok::Shl),
+                ('>', '>') => Some(Tok::Shr),
                 _ => None,
             };
             if let Some(kind) = kind {
@@ -272,6 +280,10 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
             '<' => Tok::Lt,
             '>' => Tok::Gt,
             '!' => Tok::Bang,
+            '&' => Tok::Amp,
+            '|' => Tok::Pipe,
+            '^' => Tok::Caret,
+            '~' => Tok::Tilde,
             _ => {
                 return Err(Diagnostic::error(format!("不正な文字: '{}'", c))
                     .with_code("E0001")

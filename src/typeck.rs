@@ -409,6 +409,11 @@ impl FnChecker<'_> {
                         expect(Type::Bool, t, expr.span)?;
                         Ok(Type::Bool)
                     }
+                    UnOp::BitNot => {
+                        // ビット反転は int のみ
+                        expect(Type::Int, t, expr.span)?;
+                        Ok(Type::Int)
+                    }
                 }
             }
             ExprKind::Binary { op, lhs, rhs } => {
@@ -481,6 +486,12 @@ impl FnChecker<'_> {
                         expect(Type::Bool, lt, lhs.span)?;
                         expect(Type::Bool, rt, rhs.span)?;
                         Ok(Type::Bool)
+                    }
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                        // ビット演算・シフトは int 同士 -> int
+                        expect(Type::Int, lt, lhs.span)?;
+                        expect(Type::Int, rt, rhs.span)?;
+                        Ok(Type::Int)
                     }
                 }
             }

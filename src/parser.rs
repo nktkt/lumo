@@ -477,17 +477,48 @@ impl Parser {
     }
 
     fn parse_and(&mut self) -> Result<Expr, Diagnostic> {
-        let mut lhs = self.parse_comparison()?;
+        let mut lhs = self.parse_bitor()?;
         while self.peek() == &Tok::AmpAmp {
             self.next();
-            let rhs = self.parse_comparison()?;
+            let rhs = self.parse_bitor()?;
             lhs = binary(BinOp::And, lhs, rhs);
         }
         Ok(lhs)
     }
 
+    // ビット演算は C/Rust に倣い | < ^ < & < 比較 の優先順位。
+    fn parse_bitor(&mut self) -> Result<Expr, Diagnostic> {
+        let mut lhs = self.parse_bitxor()?;
+        while self.peek() == &Tok::Pipe {
+            self.next();
+            let rhs = self.parse_bitxor()?;
+            lhs = binary(BinOp::BitOr, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
+    fn parse_bitxor(&mut self) -> Result<Expr, Diagnostic> {
+        let mut lhs = self.parse_bitand()?;
+        while self.peek() == &Tok::Caret {
+            self.next();
+            let rhs = self.parse_bitand()?;
+            lhs = binary(BinOp::BitXor, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
+    fn parse_bitand(&mut self) -> Result<Expr, Diagnostic> {
+        let mut lhs = self.parse_comparison()?;
+        while self.peek() == &Tok::Amp {
+            self.next();
+            let rhs = self.parse_comparison()?;
+            lhs = binary(BinOp::BitAnd, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
     fn parse_comparison(&mut self) -> Result<Expr, Diagnostic> {
-        let mut lhs = self.parse_additive()?;
+        let mut lhs = self.parse_shift()?;
         loop {
             let op = match self.peek() {
                 Tok::EqEq => BinOp::Eq,
@@ -496,6 +527,22 @@ impl Parser {
                 Tok::Le => BinOp::Le,
                 Tok::Gt => BinOp::Gt,
                 Tok::Ge => BinOp::Ge,
+                _ => break,
+            };
+            self.next();
+            let rhs = self.parse_shift()?;
+            lhs = binary(op, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
+    // シフトは比較より高く、加減より低い（`a + b << c` は `(a+b) << c`）。
+    fn parse_shift(&mut self) -> Result<Expr, Diagnostic> {
+        let mut lhs = self.parse_additive()?;
+        loop {
+            let op = match self.peek() {
+                Tok::Shl => BinOp::Shl,
+                Tok::Shr => BinOp::Shr,
                 _ => break,
             };
             self.next();
@@ -540,6 +587,7 @@ impl Parser {
         let op = match self.peek() {
             Tok::Minus => Some(UnOp::Neg),
             Tok::Bang => Some(UnOp::Not),
+            Tok::Tilde => Some(UnOp::BitNot),
             _ => None,
         };
         if let Some(op) = op {

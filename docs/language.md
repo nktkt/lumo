@@ -206,17 +206,35 @@ let any = ready || bigger;
 let no = !ready;
 ```
 
+### Bitwise: `& | ^ ~ << >>`
+
+Operate on `int` values (and yield `int`): AND `&`, OR `|`, XOR `^`, NOT `~`,
+left shift `<<`, and right shift `>>`. The right shift is **arithmetic**
+(sign-extending), and a shift count is taken **modulo 64**. (`&`/`|` are the
+bitwise operators; the doubled `&&`/`||` are the boolean ones.)
+
+```lumo
+print 12 & 10;     # 8
+print 1 << 4;      # 16
+print ~0;          # -1
+print -8 >> 1;     # -4
+let flags = 0;
+flags = flags | 4;     # set a bit
+print flags & 4;       # 4 (bit is set)
+```
+
 ### Type rules
 
 Mixing types in an operator is a type error. For example, `1 + 2.0`,
-`true + 1`, and `1 < 2.0` are all rejected.
+`true + 1`, and `1 < 2.0` are all rejected. The bitwise operators require `int`
+operands (`1.5 & 2` and `~true` are errors).
 
 ### Precedence
 
 From lowest to highest binding:
 
 ```
-||  <  &&  <  comparison  <  + -  <  * / %  <  unary (-, !)  <  primary
+||  <  &&  <  |  <  ^  <  &  <  comparison  <  << >>  <  + -  <  * / %  <  unary (-, !, ~)  <  primary
 ```
 
 `primary` covers literals, variables, function calls, and parenthesized
