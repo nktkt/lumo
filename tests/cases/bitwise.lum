@@ -1,0 +1,35 @@
+# Bitwise operators: & | ^ ~ << >> on ints.
+
+fn main() {
+    # basic ops
+    print 12 & 10;        # 8   (1100 & 1010 = 1000)
+    print 12 | 10;        # 14  (1100 | 1010 = 1110)
+    print 12 ^ 10;        # 6   (1100 ^ 1010 = 0110)
+    print ~0;             # -1  (all ones)
+    print ~5;             # -6
+    print 1 << 4;         # 16
+    print 256 >> 2;       # 64
+    print -8 >> 1;        # -4  (arithmetic / sign-extending shift)
+
+    # precedence: shift is above comparison, below additive
+    print 1 + 1 << 2;     # (1 + 1) << 2 = 8
+    print 1 << 2 + 1;     # 1 << (2 + 1) = 8
+    # & binds tighter than ^, which binds tighter than |
+    print 6 & 3 | 8;      # (6 & 3) | 8 = 2 | 8 = 10
+    print 5 ^ 3 & 1;      # 5 ^ (3 & 1) = 5 ^ 1 = 4
+
+    # shift count is taken modulo 64
+    print 1 << 65;        # 1 << (65 % 64) = 1 << 1 = 2
+
+    # a tiny bit-flags use
+    let flags = 0;
+    flags = flags | 1;          # set bit 0
+    flags = flags | 4;          # set bit 2
+    print flags;                # 5
+    print flags & 4;            # 4  (bit 2 is set)
+    print flags & 2;            # 0  (bit 1 is clear)
+
+    # & does not clash with the logical &&
+    print (1 == 1) && (2 == 2); # true
+    return 0;
+}

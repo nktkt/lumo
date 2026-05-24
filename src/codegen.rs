@@ -3579,6 +3579,13 @@ impl<'ctx> CodeGen<'ctx> {
                             .into(),
                         Type::Bool,
                     ),
+                    UnOp::BitNot => (
+                        self.builder
+                            .build_not(v.into_int_value(), "bitnot")
+                            .unwrap()
+                            .into(),
+                        Type::Int,
+                    ),
                 }
             }
             ExprKind::Binary { op, lhs, rhs } => match op {
@@ -4740,7 +4747,15 @@ impl<'ctx> CodeGen<'ctx> {
                         Type::Bool,
                     )
                 }
-                BinOp::Mod | BinOp::And | BinOp::Or => unreachable!(),
+                // 剰余・論理・ビット演算は float では型検査が弾く
+                BinOp::Mod
+                | BinOp::And
+                | BinOp::Or
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr => unreachable!(),
             }
         } else {
             let l = l.into_int_value();
@@ -4794,6 +4809,42 @@ impl<'ctx> CodeGen<'ctx> {
                             .unwrap()
                             .into(),
                         Type::Bool,
+                    )
+                }
+                BinOp::BitAnd => (
+                    self.builder.build_and(l, r, "band").unwrap().into(),
+                    Type::Int,
+                ),
+                BinOp::BitOr => (
+                    self.builder.build_or(l, r, "bor").unwrap().into(),
+                    Type::Int,
+                ),
+                BinOp::BitXor => (
+                    self.builder.build_xor(l, r, "bxor").unwrap().into(),
+                    Type::Int,
+                ),
+                // シフト量は 64 で剰余を取り、未定義(poison)を避ける。右シフトは算術(符号拡張)。
+                BinOp::Shl => {
+                    let amt = self
+                        .builder
+                        .build_and(r, self.ctx.i64_type().const_int(63, false), "shamt")
+                        .unwrap();
+                    (
+                        self.builder.build_left_shift(l, amt, "shl").unwrap().into(),
+                        Type::Int,
+                    )
+                }
+                BinOp::Shr => {
+                    let amt = self
+                        .builder
+                        .build_and(r, self.ctx.i64_type().const_int(63, false), "shamt")
+                        .unwrap();
+                    (
+                        self.builder
+                            .build_right_shift(l, amt, true, "shr")
+                            .unwrap()
+                            .into(),
+                        Type::Int,
                     )
                 }
                 BinOp::And | BinOp::Or => unreachable!(),

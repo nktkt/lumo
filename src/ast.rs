@@ -22,12 +22,19 @@ pub enum BinOp {
     // 論理 (bool, bool -> bool, 短絡評価)
     And,
     Or,
+    // ビット演算 (int, int -> int)。シフト量は 64 で剰余を取る。
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnOp {
-    Neg, // -x  (int -> int)
-    Not, // !x  (bool -> bool)
+    Neg,    // -x  (int -> int)
+    Not,    // !x  (bool -> bool)
+    BitNot, // ~x  (int -> int)
 }
 
 #[derive(Debug, Clone)]

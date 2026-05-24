@@ -318,6 +318,11 @@ fn compound_assignment() {
     run_ok("compound_assign");
 }
 
+#[test]
+fn bitwise_operators() {
+    run_ok("bitwise");
+}
+
 /// Multi-file: import another file's structs/functions; diamond import is deduped.
 #[test]
 fn module_import() {

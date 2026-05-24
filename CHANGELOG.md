@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.37.0]
+
+### Added
+
+- **Bitwise operators** on `int`: AND `&`, OR `|`, XOR `^`, NOT `~`, left shift `<<`, right shift `>>`. The right shift is arithmetic (sign-extending), and a shift count is taken modulo 64 (so a count `>= 64` is well-defined rather than poison). Precedence follows C/Rust: `| < ^ < & < comparison < shift < additive`, with `~` at the unary level. They are `int`-only (`1.5 & 2`, `~true` are type errors); the doubled `&&`/`||` remain the boolean operators.
+
 ## [0.36.0]
 
 ### Added
