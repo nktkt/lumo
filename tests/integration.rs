@@ -284,6 +284,11 @@ fn file_io_roundtrip() {
 }
 
 #[test]
+fn file_append() {
+    run_ok("append_file");
+}
+
+#[test]
 fn nested_collections() {
     run_ok("nested");
 }

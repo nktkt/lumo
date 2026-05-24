@@ -775,10 +775,12 @@ impl FnChecker<'_> {
                 }
 
                 // ファイル I/O: write_file(path, content) -> bool（成功で true）
-                if name == "write_file" {
+                // write_file / append_file: (string, string) -> bool
+                if name == "write_file" || name == "append_file" {
                     if args.len() != 2 {
                         return Err(Diagnostic::error(format!(
-                            "write_file() は引数2個ですが {} 個渡されました",
+                            "{}() は引数2個ですが {} 個渡されました",
+                            name,
                             args.len()
                         ))
                         .with_code("E0104")
@@ -1364,6 +1366,7 @@ fn is_reserved_name(name: &str) -> bool {
             | "is_float"
             | "read_file"
             | "write_file"
+            | "append_file"
             | "to_upper"
             | "to_lower"
             | "trim"

@@ -881,6 +881,70 @@ impl<'ctx> CodeGen<'ctx> {
                 .unwrap();
             self.builder.build_return(Some(&ok)).unwrap();
         }
+
+        // --- i1 lumo_append_file(ptr path, ptr content): 末尾に追記。成功で true ---
+        // lumo_write_file と同じだが fopen のモードが "ab"（追記）。
+        let append_fn = self.module.add_function(
+            "lumo_append_file",
+            i1t.fn_type(&[ptr.into(), ptr.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(append_fn, "entry");
+            let ok_bb = self.ctx.append_basic_block(append_fn, "ok");
+            let fail_bb = self.ctx.append_basic_block(append_fn, "fail");
+            let path = append_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let content = append_fn.get_nth_param(1).unwrap().into_pointer_value();
+            self.builder.position_at_end(entry);
+            let mode = self.global_str("ab", "io_mode_ab");
+            let fopen = self.module.get_function("fopen").unwrap();
+            let f = self
+                .builder
+                .build_call(fopen, &[path.into(), mode.into()], "f")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_pointer_value();
+            let is_null = self.builder.build_is_null(f, "isnull").unwrap();
+            self.builder
+                .build_conditional_branch(is_null, fail_bb, ok_bb)
+                .unwrap();
+            self.builder.position_at_end(fail_bb);
+            self.builder.build_return(Some(&i1t.const_zero())).unwrap();
+            self.builder.position_at_end(ok_bb);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let n = self
+                .builder
+                .build_call(strlen, &[content.into()], "n")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let fwrite = self.module.get_function("fwrite").unwrap();
+            let nw = self
+                .builder
+                .build_call(
+                    fwrite,
+                    &[
+                        content.into(),
+                        i64t.const_int(1, false).into(),
+                        n.into(),
+                        f.into(),
+                    ],
+                    "nw",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let fclose = self.module.get_function("fclose").unwrap();
+            self.builder.build_call(fclose, &[f.into()], "").unwrap();
+            let ok = self
+                .builder
+                .build_int_compare(IntPredicate::EQ, nw, n, "ok")
+                .unwrap();
+            self.builder.build_return(Some(&ok)).unwrap();
+        }
     }
 
     /// 文字列→数値パースのランタイム。libc の strtol/strtod を endptr 付きで呼び、
@@ -4110,6 +4174,19 @@ impl<'ctx> CodeGen<'ctx> {
                 let r = self
                     .builder
                     .build_call(f, &[pv.into(), cv.into()], "wrfile")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Bool)
+            }
+            ExprKind::Call { name, args } if name == "append_file" => {
+                // append_file(path, content): 末尾に追記し、成功なら true。
+                let (pv, _) = self.gen_expr(&args[0]);
+                let (cv, _) = self.gen_expr(&args[1]);
+                let f = self.module.get_function("lumo_append_file").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[pv.into(), cv.into()], "apfile")
                     .unwrap()
                     .try_as_basic_value()
                     .unwrap_basic();
