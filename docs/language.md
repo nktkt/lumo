@@ -198,15 +198,17 @@ let s = "foo" + "bar";     # string -> "foobar"
 
 ### Modulo: `%`
 
-Defined for `int` only.
+Works on `int` and `float` (both operands the same type), like the other
+arithmetic operators. The result takes the sign of the dividend.
 
 ```lumo
-let r = 10 % 3;      # 1
+let r = 10 % 3;        # 1
+let f = 5.5 % 2.0;     # 1.5
 ```
 
 Integer `/` and `%` by zero abort at runtime with `lumo: division by zero`
-(exit 101). Float division by zero follows IEEE rules (`1.0 / 0.0` is infinity),
-not an error.
+(exit 101). Float `/` and `%` follow IEEE rules instead (`1.0 / 0.0` is infinity,
+`x % 0.0` is NaN), not an error.
 
 ### Comparison: `== != < <= > >=`
 

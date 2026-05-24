@@ -79,7 +79,7 @@ fn import_err(msg: String, span: Option<Span>) -> Diagnostic {
 }
 
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.42");
+    eprintln!("Lumo compiler 0.43");
     eprintln!("使い方:");
     eprintln!("  lumo <command> [-O0|-O1|-O2|-O3] <file.lum>");
     eprintln!();
