@@ -1,6 +1,6 @@
 [package]
 name = "lumo"
-version = "0.43.0"
+version = "0.44.0"
 edition = "2021"
 description = "Lumo - a tiny programming language compiled with LLVM"
 
@@ -10,3 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 inkwell = { version = "0.9.0", features = ["llvm22-1"] }
+
+[build-dependencies]
+# Boehm GC (bdw-gc) を探して lumo 本体にリンクする。JIT 実行時に GC_* シンボルを
+# プロセスから解決できるようにするため（RFC 0001）。
+pkg-config = "0.3"

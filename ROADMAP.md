@@ -72,7 +72,7 @@ Status: ✅ done · 🟡 partial · ⬜ not started.
 | 1 | `v0.2` | **Foundations** | ✅ | Source spans, rich diagnostics, test harness, CI |
 | 2 | `v0.3` | **A useful language** | ✅ | `bool`/`float`/`string`/arrays, richer control flow |
 | 3 | `v0.4` | **Type system** | 🟡 | Annotations + a type-checking pass done; generics/traits/`struct`s not done |
-| 4 | `v0.5` | **Memory & runtime** | 🟡 | Minimal malloc-backed allocator done; reclamation + heap-model decision open |
+| 4 | `v0.5` | **Memory & runtime** | 🟡 | Allocator + **GC reclamation** (Boehm, v0.44) done; runtime/stdlib boundary still ad-hoc |
 | — | — | **Optimization** | 🟡 | `-O0`..`-O3` done; incremental/parallel compilation not done |
 | 5 | `v0.6` | **Modules & packages** | ⬜ | Module system, FFI, package manager + registry (alpha) |
 | 6 | `v0.7` | **Tooling & DX** | ⬜ | LSP, formatter, REPL, debug info (DWARF) |
@@ -124,13 +124,13 @@ Status: ✅ done · 🟡 partial · ⬜ not started.
 ### Phase 4 — Memory & runtime (`v0.5`) 🟡
 *A model that lasts.*
 
-- [x] A minimal heap runtime (`lumo_alloc`, malloc-backed) powering strings and arrays.
-- [~] **Research spike + RFC**: ownership/borrowing vs tracing GC vs ARC — RFC 0001 drafted; decision still open.
-- [ ] Implement the chosen model; memory **reclamation** (arena/regions) with deterministic cleanup or GC. *(Allocations currently leak.)*
+- [x] A minimal heap runtime (`lumo_alloc`) powering strings, arrays, maps, and structs.
+- [x] **Research spike + RFC**: ownership/borrowing vs tracing GC vs ARC — [RFC 0001](docs/rfcs/0001-memory-model.md) decided: **Boehm conservative GC** (v0.44).
+- [x] Implement the chosen model; memory **reclamation** via the Boehm GC (`GC_malloc`/`GC_realloc`), v0.44 — allocations are reclaimed automatically (no longer leak).
 - [~] Begin the **standard library**: collections, strings, math, basic I/O. *(Arrays + `push`/`pop`/slicing (`a[i:j]`)/`sorted`/`reversed` (v0.32–0.33), math built-ins, an associative `map` type — [RFC 0002](docs/rfcs/0002-map-type.md), shipped in v0.24 — **nested collections** (`[[T]]`, `{string: [V]}`, v0.29), the string toolkit (`substr`/`split`/`join`, `to_upper`/`to_lower`/`trim`/`find`/`contains`/`starts_with`/`ends_with`/`replace`/`repeat`, slicing, + `int`/`float`/`is_int`/`is_float` parsing), and file I/O (`read_file`/`write_file`, v0.28) are done; more stdlib ongoing.)*
 - [ ] Formalize the runtime (replace ad-hoc `printf` with a real runtime/stdlib boundary).
 
-**Exit:** programs that allocate and free memory run without leaks under the chosen model.
+**Exit:** programs that allocate and free memory run without leaks under the chosen model. ✅ *(GC reclaims; heavy-allocation loops run in bounded memory.)*
 
 ### Phase 5 — Modules & packages (`v0.6`)
 *Code in the large.*
@@ -232,12 +232,17 @@ These run continuously, not as one-off phases.
 
 ## Immediate next steps (next few PRs)
 
-Phases 1–2 and the typed front end are done (see [Progress so far](#progress-so-far)).
-The highest-leverage work right now, in order:
+Phases 1–4 are largely done (typed front end, full standard-library surface,
+modules with `import`/`pub`, and **GC-backed memory reclamation** as of v0.44 —
+see [Progress so far](#progress-so-far)). The highest-leverage work remaining, in
+rough order:
 
-1. **Memory reclamation** — `lumo_alloc` allocations currently leak; design and
-   implement an arena/region scheme (or land the heap-model decision in RFC 0001).
-2. **`struct`s** — user-defined types, field access, and construction (Phase 3).
-3. **Local type inference** — reduce the annotation burden the checker requires today.
+1. **Generics / traits** (Phase 7) — the big front-end gap; generic collections
+   and functions instead of monomorphic built-ins.
+2. **Developer tooling** (Phase 6) — a formatter (needs comment-preserving
+   infrastructure), then LSP / REPL.
+3. **Module system v2** — qualified imports (`import "x" as x; x.item`), the
+   remaining half of [RFC 0004](docs/rfcs/0004-module-visibility.md).
+4. **Runtime/stdlib boundary** — formalize the ad-hoc runtime into a real stdlib.
 
 Track progress on the GitHub issues/milestones for each phase.

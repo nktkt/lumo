@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.44.0]
+
+### Added
+
+- **Automatic memory management (garbage collection).** Heap allocations — strings, arrays, maps, structs — are now **reclaimed automatically** instead of leaking for the process lifetime. Lumo's runtime uses the Boehm–Demers–Weiser conservative collector ([`libgc`](https://github.com/bdwgc/bdwgc)), per the decision in [RFC 0001](docs/rfcs/0001-memory-model.md): `lumo_alloc` → `GC_malloc`, the array/map growth paths → `GC_realloc`, `GC_init` at startup. A program that allocates in a loop (e.g. millions of string/array churns) now runs in **bounded** memory — measured ~3 MB peak for 3,000,000 allocating iterations.
+
+### Build
+
+- **New dependency: the Boehm GC (bdw-gc).** Install it before building (`brew install bdw-gc` on macOS, `apt-get install libgc-dev` on Debian/Ubuntu). A new `build.rs` finds it via `pkg-config` and links the `lumo` binary against it so the JIT can resolve the GC symbols; native `build` output links `-lgc` too. CI installs it on both runners.
+
+### Notes
+
+- The collector is conservative (it may rarely retain a value that looks like a pointer) and non-moving — acceptable for Lumo's scale, and isolated behind the `lumo_alloc` boundary so a precise/moving collector (or compile-time ownership) remains a future option. No surface or behavior change: all existing programs run identically.
+
 ## [0.43.0]
 
 ### Added

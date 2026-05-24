@@ -17,9 +17,14 @@ You write the front end; LLVM handles optimization and code generation.
 
 - Rust (stable)
 - LLVM 22 (Homebrew: `brew install llvm@22`)
+- The Boehm GC (Homebrew: `brew install bdw-gc`; Debian/Ubuntu:
+  `apt-get install libgc-dev`) — Lumo's runtime reclaims heap memory with it
+  ([RFC 0001](docs/rfcs/0001-memory-model.md)).
 
 `.cargo/config.toml` sets `LLVM_SYS_221_PREFIX` to `/opt/homebrew/opt/llvm@22`,
 so `inkwell`/`llvm-sys` can find LLVM. Adjust the path if your install differs.
+`build.rs` finds `bdw-gc` via `pkg-config` and links the compiler against it (so
+the JIT can resolve `GC_*`).
 
 ## Build
 

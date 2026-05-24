@@ -122,6 +122,13 @@ fn arithmetic() {
     run_ok("arithmetic");
 }
 
+/// Heavy allocation churn must produce the right answer under the GC (and, in
+/// practice, run in bounded memory rather than leaking).
+#[test]
+fn gc_allocation_churn() {
+    run_ok("gc_stress");
+}
+
 #[test]
 fn fib() {
     run_ok("fib");

@@ -176,20 +176,18 @@ impl<'ctx> CodeGen<'ctx> {
 
         // 文字列ヒープ操作に使う libc 関数
         let ext = Some(Linkage::External);
+        // Boehm GC (bdw-gc): 回収対象のヒープを確保する（RFC 0001 の決定）。
+        // GC_malloc はゼロ初期化済みメモリを返す（calloc 代わりにも使える）。
+        // GC_init はプログラム開始時に1度呼ぶ（スタック基準を固定し JIT でも根を正しく走査）。
         self.module
-            .add_function("malloc", ptr.fn_type(&[i64t.into()], false), ext);
-        // void* calloc(size_t n, size_t size) — map のゼロ初期化バケット配列に使う
+            .add_function("GC_malloc", ptr.fn_type(&[i64t.into()], false), ext);
         self.module.add_function(
-            "calloc",
-            ptr.fn_type(&[i64t.into(), i64t.into()], false),
-            ext,
-        );
-        // void* realloc(void* ptr, size_t size) — 配列を伸ばす push() に使う
-        self.module.add_function(
-            "realloc",
+            "GC_realloc",
             ptr.fn_type(&[ptr.into(), i64t.into()], false),
             ext,
         );
+        self.module
+            .add_function("GC_init", self.ctx.void_type().fn_type(&[], false), ext);
         self.module
             .add_function("strlen", i64t.fn_type(&[ptr.into()], false), ext);
         // void* memcpy(void* dst, void* src, size_t n) — substr/split/join に使う
@@ -246,18 +244,18 @@ impl<'ctx> CodeGen<'ctx> {
         let stdin_g = self.module.add_global(ptr, None, stdin_symbol());
         stdin_g.set_linkage(Linkage::External);
 
-        // ヒープ確保のチョークポイント。今は malloc を呼ぶだけ（回収なし）。
-        // 将来ここを arena/region アロケータに差し替える（RFC 0001）。
+        // ヒープ確保のチョークポイント。Boehm GC の GC_malloc を呼ぶ（RFC 0001）。
+        // 到達不能になったブロックは GC が自動回収する。全ヒープ確保はここを通す。
         let alloc =
             self.module
                 .add_function("lumo_alloc", ptr.fn_type(&[i64t.into()], false), None);
         let bb = self.ctx.append_basic_block(alloc, "entry");
         self.builder.position_at_end(bb);
         let size = alloc.get_nth_param(0).unwrap();
-        let malloc = self.module.get_function("malloc").unwrap();
+        let gc_malloc = self.module.get_function("GC_malloc").unwrap();
         let mem = self
             .builder
-            .build_call(malloc, &[size.into()], "mem")
+            .build_call(gc_malloc, &[size.into()], "mem")
             .unwrap()
             .try_as_basic_value()
             .unwrap_basic();
@@ -2403,15 +2401,14 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder
                 .build_store(self.hdr_field(hdr, 8), i64t.const_int(nbuckets, false))
                 .unwrap();
-            let calloc = self.module.get_function("calloc").unwrap();
+            // バケット配列は entry ポインタを保持するので GC 管理ヒープに置く
+            // （GC_malloc はゼロ初期化済み＝旧 calloc と同じ）。
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
             let buckets = self
                 .builder
                 .build_call(
-                    calloc,
-                    &[
-                        i64t.const_int(nbuckets, false).into(),
-                        i64t.const_int(8, false).into(),
-                    ],
+                    alloc,
+                    &[i64t.const_int(nbuckets * 8, false).into()],
                     "buckets",
                 )
                 .unwrap()
@@ -2568,14 +2565,15 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_load(ptr, self.hdr_field(hdr, 16), "old_buckets")
                 .unwrap()
                 .into_pointer_value();
-            let calloc = self.module.get_function("calloc").unwrap();
+            // 新バケット配列も GC 管理ヒープに（GC_malloc はゼロ初期化済み）。
+            let new_bytes = self
+                .builder
+                .build_int_mul(new_nb, i64t.const_int(8, false), "new_bytes")
+                .unwrap();
+            let alloc = self.module.get_function("lumo_alloc").unwrap();
             let new_buckets = self
                 .builder
-                .build_call(
-                    calloc,
-                    &[new_nb.into(), i64t.const_int(8, false).into()],
-                    "new_b",
-                )
+                .build_call(alloc, &[new_bytes.into()], "new_b")
                 .unwrap()
                 .try_as_basic_value()
                 .unwrap_basic()
@@ -3225,6 +3223,13 @@ impl<'ctx> CodeGen<'ctx> {
         let function = self.module.get_function(&f.name).unwrap();
         let entry = self.ctx.append_basic_block(function, "entry");
         self.builder.position_at_end(entry);
+
+        // main の先頭で Boehm GC を初期化する（スタック基準を固定し、JIT でも
+        // 根を正しく走査できるようにする）。RFC 0001。
+        if f.name == "main" {
+            let gc_init = self.module.get_function("GC_init").unwrap();
+            self.builder.build_call(gc_init, &[], "").unwrap();
+        }
 
         // 関数スコープ（引数とトップレベルのローカル）を1層だけ用意する
         self.scopes = vec![HashMap::new()];
@@ -4247,7 +4252,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_int_mul(newcap, i64t.const_int(8, false), "newsize")
                     .unwrap();
-                let realloc = self.module.get_function("realloc").unwrap();
+                let realloc = self.module.get_function("GC_realloc").unwrap();
                 let newdata = self
                     .builder
                     .build_call(realloc, &[data_old.into(), newsize.into()], "rdata")
@@ -5320,6 +5325,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         let status = Command::new("clang")
             .arg(&obj_path)
+            .args(gc_link_flags()) // Boehm GC（生成コードが GC_* を呼ぶ）
             .arg("-o")
             .arg(out)
             .status()
@@ -5330,4 +5336,24 @@ impl<'ctx> CodeGen<'ctx> {
         let _ = std::fs::remove_file(&obj_path);
         Ok(())
     }
+}
+
+/// ネイティブリンク時に Boehm GC を結ぶための clang フラグ。
+/// `pkg-config --libs bdw-gc`（無ければ `gc`）の出力を使い、どちらも無ければ
+/// 素の `-lgc` にフォールバックする。
+fn gc_link_flags() -> Vec<String> {
+    for name in ["bdw-gc", "gc"] {
+        if let Ok(out) = Command::new("pkg-config").args(["--libs", name]).output() {
+            if out.status.success() {
+                let flags: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                if !flags.is_empty() {
+                    return flags;
+                }
+            }
+        }
+    }
+    vec!["-lgc".to_string()]
 }
