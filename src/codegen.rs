@@ -4853,6 +4853,8 @@ impl<'ctx> CodeGen<'ctx> {
                 BinOp::Sub => (b.build_float_sub(l, r, "fsub").unwrap().into(), Type::Float),
                 BinOp::Mul => (b.build_float_mul(l, r, "fmul").unwrap().into(), Type::Float),
                 BinOp::Div => (b.build_float_div(l, r, "fdiv").unwrap().into(), Type::Float),
+                // 剰余は frem（C の fmod 相当: 結果の符号は被除数）。0 除算は NaN（float / と同じ）。
+                BinOp::Mod => (b.build_float_rem(l, r, "frem").unwrap().into(), Type::Float),
                 BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                     let pred = match op {
                         BinOp::Eq => FloatPredicate::OEQ,
@@ -4868,9 +4870,8 @@ impl<'ctx> CodeGen<'ctx> {
                         Type::Bool,
                     )
                 }
-                // 剰余・論理・ビット演算は float では型検査が弾く
-                BinOp::Mod
-                | BinOp::And
+                // 論理・ビット演算は float では型検査が弾く
+                BinOp::And
                 | BinOp::Or
                 | BinOp::BitAnd
                 | BinOp::BitOr

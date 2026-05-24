@@ -484,19 +484,13 @@ impl FnChecker<'_> {
                             Ok(lt)
                         }
                     }
-                    BinOp::Sub | BinOp::Mul | BinOp::Div => {
-                        // 算術は int 同士 / float 同士。結果は同じ型。
+                    BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                        // 算術・剰余は int 同士 / float 同士。結果は同じ型。
                         if !lt.is_numeric() {
                             return Err(numeric_required(lt, lhs.span));
                         }
                         expect(lt, rt, rhs.span)?;
                         Ok(lt)
-                    }
-                    BinOp::Mod => {
-                        // 剰余は int のみ
-                        expect(Type::Int, lt, lhs.span)?;
-                        expect(Type::Int, rt, rhs.span)?;
-                        Ok(Type::Int)
                     }
                     BinOp::Eq | BinOp::Ne => {
                         // 等価比較: int/float/string 同士、または参照型 vs null -> bool

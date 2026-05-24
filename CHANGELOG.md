@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.43.0]
+
+### Added
+
+- **`%` works on `float`** (not just `int`), matching the other arithmetic operators. `5.5 % 2.0` is `1.5`; the result takes the sign of the dividend (C `fmod`/LLVM `frem` semantics). Float `% 0.0` is `NaN` (no abort), consistent with float division. `int % int` is unchanged, and mixing `int`/`float` remains a type error.
+
 ## [0.42.0]
 
 ### Added
