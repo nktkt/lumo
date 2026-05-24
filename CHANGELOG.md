@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.38.0]
+
+### Added
+
+- **Compound bitwise assignment** `&=`, `|=`, `^=`, `<<=`, `>>=` — completing the compound-assignment family alongside `+= -= *= /= %=`. Like the others, `a OP= b` desugars to `a = a OP b` and works on any assignment target (variables, array elements, map values, struct fields). The lexer now recognizes three-character operators so `<<=` / `>>=` don't collide with `<<` / `>>` or `<=` / `>=`.
+
 ## [0.37.0]
 
 ### Added

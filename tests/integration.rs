@@ -323,6 +323,11 @@ fn bitwise_operators() {
     run_ok("bitwise");
 }
 
+#[test]
+fn compound_bitwise_assignment() {
+    run_ok("compound_bitwise");
+}
+
 /// Multi-file: import another file's structs/functions; diamond import is deduped.
 #[test]
 fn module_import() {

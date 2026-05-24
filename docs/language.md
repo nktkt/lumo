@@ -121,18 +121,22 @@ n = n + 1;   # ok: int = int
 # n = 2.0;   # error: cannot assign float to an int variable
 ```
 
-The **compound assignment** operators `+=`, `-=`, `*=`, `/=`, and `%=` are
-shorthand: `a OP= b` means `a = a OP b`. They work wherever plain `=` does — on
-variables, array elements (`a[i] += 1`), map values (`m[k] += 1`), and struct
-fields (`p.x *= 2`) — and follow the same type rules (so `+=` also concatenates
-strings, while `%=` is `int`-only).
+The **compound assignment** operators `+=`, `-=`, `*=`, `/=`, `%=`, and the
+bitwise `&=`, `|=`, `^=`, `<<=`, `>>=` are shorthand: `a OP= b` means
+`a = a OP b`. They work wherever plain `=` does — on variables, array elements
+(`a[i] += 1`), map values (`m[k] += 1`), and struct fields (`p.x *= 2`) — and
+follow the same type rules (so `+=` also concatenates strings, while `%=` and the
+bitwise forms are `int`-only).
 
 ```lumo
 let n = 10;
-n += 5;      # 15
-n *= 2;      # 30
+n += 5;          # 15
+n *= 2;          # 30
 let s = "a";
-s += "b";    # "ab"
+s += "b";        # "ab"
+let flags = 0;
+flags |= 4;      # set a bit
+flags <<= 1;     # 8
 ```
 
 (Because `a OP= b` expands to `a = a OP b`, the target `a` is evaluated twice; if
