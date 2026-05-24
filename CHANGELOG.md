@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.39.0]
+
+### Added
+
+- **`assert` and `panic`** for user-level error handling. `panic(msg)` writes `msg` to stderr and exits with status 101 (never returns); `assert(cond, msg)` is a no-op when `cond` is true and `panic(msg)` otherwise (the message is only evaluated on failure). Both reuse the existing `lumo_panic` runtime, so they abort exactly like the built-in safety checks (bounds, `null`, division by zero). Used as statements.
+- `examples/guard.lum`: input validation with `assert` / `panic`.
+
 ## [0.38.0]
 
 ### Added

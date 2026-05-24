@@ -706,8 +706,31 @@ if (is_int(s)) {
 `sorted`, `reversed`, `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`,
 `keys`, `delete`, `substr`, `split`, `join`, `is_int`, `is_float`, `read_file`,
 `write_file`, `to_upper`, `to_lower`, `trim`, `find`, `contains`, `starts_with`,
-`ends_with`, `replace`, and `repeat` are reserved names — you cannot define a
-function with one of them.
+`ends_with`, `replace`, `repeat`, `panic`, and `assert` are reserved names — you
+cannot define a function with one of them.
+
+### `assert` / `panic`
+
+For failing fast on a broken invariant or bad input:
+
+- **`panic(msg)`** writes `msg` to stderr and exits the program with status 101.
+  It never returns.
+- **`assert(cond, msg)`** is a no-op when `cond` (a `bool`) is true, and
+  `panic(msg)` when it is false. The `msg` is only evaluated on failure.
+
+```lumo
+fn checked_div(a: int, b: int) -> int {
+    assert(b != 0, "checked_div: divisor must be non-zero");
+    return a / b;
+}
+
+if (count < 0) {
+    panic("count went negative");
+}
+```
+
+Both are used as statements. They abort the same way the built-in safety checks
+do (array bounds, `null`, division by zero), so they share the exit code 101.
 
 ### `read_line`
 

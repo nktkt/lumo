@@ -3125,6 +3125,24 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.build_unreachable().unwrap();
     }
 
+    /// 実行時の文字列 `msg`（ユーザーの `panic`/`assert` メッセージ）で異常終了する。
+    /// `lumo_panic(msg, strlen(msg))` を呼んで unreachable で締める。
+    fn panic_runtime(&mut self, msg: PointerValue<'ctx>) {
+        let strlen = self.module.get_function("strlen").unwrap();
+        let len = self
+            .builder
+            .build_call(strlen, &[msg.into()], "msglen")
+            .unwrap()
+            .try_as_basic_value()
+            .unwrap_basic()
+            .into_int_value();
+        let panic_fn = self.module.get_function("lumo_panic").unwrap();
+        self.builder
+            .build_call(panic_fn, &[msg.into(), len.into()], "")
+            .unwrap();
+        self.builder.build_unreachable().unwrap();
+    }
+
     /// ポインタが null なら "null reference" で異常終了するチェックを差し込む。
     fn null_check(&mut self, p: PointerValue<'ctx>) {
         let isnull = self.builder.build_is_null(p, "isnull").unwrap();
@@ -3850,6 +3868,32 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_call(f, &[hdr.into(), key.into(), h.into()], "")
                     .unwrap();
                 // 文として使う想定。式の値は便宜上 int 0。
+                (self.ctx.i64_type().const_zero().into(), Type::Int)
+            }
+            ExprKind::Call { name, args } if name == "panic" => {
+                // panic(msg): メッセージを stderr に書いて exit(101)。
+                let (mv, _) = self.gen_expr(&args[0]);
+                self.panic_runtime(mv.into_pointer_value());
+                // unreachable の後、後続コード生成のためにダミーの dead block を開く。
+                let function = self.cur_function();
+                let dead = self.ctx.append_basic_block(function, "after.panic");
+                self.builder.position_at_end(dead);
+                (self.ctx.i64_type().const_zero().into(), Type::Int)
+            }
+            ExprKind::Call { name, args } if name == "assert" => {
+                // assert(cond, msg): cond が偽なら msg で panic（msg は失敗時のみ評価）。
+                let (cv, _) = self.gen_expr(&args[0]);
+                let cond = cv.into_int_value();
+                let function = self.cur_function();
+                let fail = self.ctx.append_basic_block(function, "assert.fail");
+                let ok = self.ctx.append_basic_block(function, "assert.ok");
+                self.builder
+                    .build_conditional_branch(cond, ok, fail)
+                    .unwrap();
+                self.builder.position_at_end(fail);
+                let (mv, _) = self.gen_expr(&args[1]);
+                self.panic_runtime(mv.into_pointer_value());
+                self.builder.position_at_end(ok);
                 (self.ctx.i64_type().const_zero().into(), Type::Int)
             }
             ExprKind::Call { name, args } if name == "keys" => {

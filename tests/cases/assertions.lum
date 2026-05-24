@@ -1,0 +1,16 @@
+# assert(cond, msg): aborts with msg when cond is false; otherwise a no-op.
+# panic(msg): always aborts. Here every assertion passes.
+
+fn checked_div(a: int, b: int) -> int {
+    assert(b != 0, "checked_div: divisor must be non-zero");
+    return a / b;
+}
+
+fn main() {
+    print checked_div(20, 4);          # 5
+    assert(true, "never fires");
+    let n = 3;
+    assert(n > 0 && n < 10, "n out of range");
+    print "ok";
+    return 0;
+}

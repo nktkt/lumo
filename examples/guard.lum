@@ -1,0 +1,24 @@
+# Defensive programming with assert / panic.
+#
+# assert(cond, msg) fails fast (exit 101, msg on stderr) when an invariant is
+# violated; panic(msg) aborts unconditionally. Used here to validate inputs.
+#
+#   cargo run -- run examples/guard.lum
+#   -> 120 / 1
+#   (calling factorial(-1) would abort with "factorial: n must be >= 0")
+
+fn factorial(n: int) -> int {
+    assert(n >= 0, "factorial: n must be >= 0");
+    let r = 1;
+    for (let i = 2; i <= n; i += 1) {
+        r *= i;
+    }
+    return r;
+}
+
+fn main() {
+    print factorial(5);     # 120
+    print factorial(0);     # 1
+    # print factorial(-1);  # would abort: factorial: n must be >= 0
+    return 0;
+}

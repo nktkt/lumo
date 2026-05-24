@@ -608,6 +608,35 @@ impl FnChecker<'_> {
                     return Ok(Type::Int); // 文として使う想定（戻り値は便宜上 int）
                 }
 
+                // panic(msg): メッセージを表示して異常終了。文として使う。
+                if name == "panic" {
+                    if args.len() != 1 {
+                        return Err(Diagnostic::error(format!(
+                            "panic() は引数1個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    return Ok(Type::Int); // 文として使う想定（実際には返らない）
+                }
+
+                // assert(cond, msg): cond が偽なら msg で異常終了。
+                if name == "assert" {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "assert() は引数2個ですが {} 個渡されました",
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Bool, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Int); // 文として使う想定
+                }
+
                 // 組み込み keys(map): キー一覧を [string] で返す（順序は未定義）
                 if name == "keys" {
                     if args.len() != 1 {
@@ -1253,6 +1282,8 @@ fn is_reserved_name(name: &str) -> bool {
             | "pop"
             | "sorted"
             | "reversed"
+            | "panic"
+            | "assert"
             | "sqrt"
             | "pow"
             | "abs"

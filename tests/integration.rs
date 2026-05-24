@@ -328,6 +328,21 @@ fn compound_bitwise_assignment() {
     run_ok("compound_bitwise");
 }
 
+#[test]
+fn assertions_pass() {
+    run_ok("assertions");
+}
+
+#[test]
+fn assert_failure_aborts() {
+    run_err("assert_fail", "n must be < 10");
+}
+
+#[test]
+fn panic_aborts() {
+    run_err("panic_msg", "boom: explicit failure");
+}
+
 /// Multi-file: import another file's structs/functions; diamond import is deduped.
 #[test]
 fn module_import() {
