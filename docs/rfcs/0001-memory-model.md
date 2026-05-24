@@ -1,6 +1,9 @@
 # RFC 0001 — Memory-Management Strategy for Lumo
 
-- **Status:** **Decided (revised 2026-05-24).** The original draft recommended
+- **Status:** **Implemented (Boehm GC, `v0.44.0`).** Decided in the 2026-05-24
+  revision and shipped: `lumo_alloc`→`GC_malloc`, grow paths→`GC_realloc`,
+  `GC_init` at startup; heap is reclaimed automatically. The original draft
+  recommended
   "arena-first, reclamation-deferred," which shipped as a never-free
   `lumo_alloc` (a malloc wrapper). With heap strings, growable arrays, maps, and
   structs all in the language now — and a *scalable* product as the goal — the
