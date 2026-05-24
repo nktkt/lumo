@@ -96,6 +96,25 @@ not valid; write `1.0` and `0.5` instead.
 String literals are enclosed in double quotes and support the escapes `\n`,
 `\t`, `\r`, `\\`, `\"`, and `\0`. A string literal may not span multiple lines.
 
+### String interpolation
+
+A string literal may embed expressions in `{ }`; each is converted with
+[`str`](#str) and concatenated:
+
+```lumo
+let name = "Ada";
+let age = 36;
+print "Hello, {name}! Next year you turn {age + 1}.";
+# Hello, Ada! Next year you turn 37.
+```
+
+`"a {e} b"` is exactly `"a " + str(e) + " b"`, so the embedded expression is
+type-checked normally — a non-stringable value (array, map, struct) is an error,
+just as `str(...)` would be. Write a **literal brace** by doubling it: `{{` and
+`}}` produce `{` and `}`. (For now an interpolation expression cannot itself
+contain a `"` or `{`; assign such a value to a variable first and interpolate
+that.)
+
 Comments start with `#` and run to the end of the line:
 
 ```lumo

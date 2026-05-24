@@ -1,0 +1,4 @@
+fn main() {
+    print "oops {x";
+    return 0;
+}

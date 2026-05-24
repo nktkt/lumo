@@ -10,6 +10,8 @@ pub enum Tok {
     Int(i64),
     Float(f64),
     Str(String),
+    /// 補間文字列 `"a {x} b"`。リテラル片と式ソース片の並び。
+    InterpStr(Vec<Segment>),
     Ident(String),
     // キーワード
     Fn,
@@ -82,6 +84,16 @@ pub struct Token {
     pub span: Span,
 }
 
+/// 補間文字列の構成片。`"a {x+1} b"` は Lit("a ") / Expr("x+1") / Lit(" b")。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Segment {
+    /// リテラル片（エスケープ・`{{`/`}}` 解決済み）。
+    Lit(String),
+    /// `{ ... }` の中の式ソース。`offset` はそのソースのファイル内バイト位置で、
+    /// 再字句解析したトークンの span をずらして正しい位置を指すために使う。
+    Expr { src: String, offset: usize },
+}
+
 /// 位置 i のトークン開始バイトオフセット。終端では src の長さを返す。
 fn byte_at(chars: &[(usize, char)], src: &str, i: usize) -> usize {
     if i < chars.len() {
@@ -114,11 +126,13 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
             continue;
         }
 
-        // 文字列リテラル "..."（エスケープ: \n \t \\ \"）
+        // 文字列リテラル "..."（エスケープ: \n \t \\ \" \0、補間 {expr}、{{ }} で波括弧）
         if c == '"' {
             let start = off;
             i += 1; // 開きクォートを消費
-            let mut s = String::new();
+            let mut cur = String::new();
+            let mut segments: Vec<Segment> = Vec::new();
+            let mut interpolated = false;
             loop {
                 if i >= n || chars[i].1 == '\n' {
                     return Err(Diagnostic::error("文字列が閉じられていません")
@@ -158,17 +172,96 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
                             )));
                         }
                     };
-                    s.push(decoded);
+                    cur.push(decoded);
                     i += 1;
-                } else {
-                    s.push(ch);
-                    i += 1;
+                    continue;
                 }
+                // {{ / }} は波括弧そのもの
+                if ch == '{' && i + 1 < n && chars[i + 1].1 == '{' {
+                    cur.push('{');
+                    i += 2;
+                    continue;
+                }
+                if ch == '}' {
+                    if i + 1 < n && chars[i + 1].1 == '}' {
+                        cur.push('}');
+                        i += 2;
+                        continue;
+                    }
+                    return Err(Diagnostic::error(
+                        "文字列中の } は }} と書いてください（補間の閉じは { と対応します）",
+                    )
+                    .with_code("E0004")
+                    .at(Span::new(
+                        file,
+                        chars[i].0,
+                        byte_at(&chars, src, i + 1),
+                    )));
+                }
+                // {expr}: 式ソースを } まで取り込む（v1 は式に " や { を含められない）
+                if ch == '{' {
+                    interpolated = true;
+                    segments.push(Segment::Lit(std::mem::take(&mut cur)));
+                    i += 1; // '{' を消費
+                    let expr_start = byte_at(&chars, src, i);
+                    let mut esrc = String::new();
+                    loop {
+                        if i >= n || chars[i].1 == '\n' {
+                            return Err(Diagnostic::error("補間 {…} が閉じられていません")
+                                .with_code("E0004")
+                                .at(Span::new(file, start, byte_at(&chars, src, i))));
+                        }
+                        let ec = chars[i].1;
+                        if ec == '}' {
+                            i += 1; // '}' を消費
+                            break;
+                        }
+                        // 文字列の終端 " に先に当たった = 補間が閉じていない
+                        // （v1 は補間式に " を含められないので、その案内も兼ねる）
+                        if ec == '"' {
+                            return Err(Diagnostic::error(
+                                "補間 {…} が閉じられていません（補間式に \" は使えません。先に変数へ取り出してください）",
+                            )
+                            .with_code("E0004")
+                            .at(Span::new(file, start, byte_at(&chars, src, i))));
+                        }
+                        // v1 は入れ子の波括弧（map リテラル等）を補間式に書けない
+                        if ec == '{' {
+                            return Err(Diagnostic::error(
+                                "補間式に { は書けません（先に変数へ取り出してください）",
+                            )
+                            .with_code("E0004")
+                            .at(Span::new(
+                                file,
+                                chars[i].0,
+                                byte_at(&chars, src, i + 1),
+                            )));
+                        }
+                        esrc.push(ec);
+                        i += 1;
+                    }
+                    segments.push(Segment::Expr {
+                        src: esrc,
+                        offset: expr_start,
+                    });
+                    continue;
+                }
+                cur.push(ch);
+                i += 1;
             }
-            toks.push(Token {
-                kind: Tok::Str(s),
-                span: Span::new(file, start, byte_at(&chars, src, i)),
-            });
+            let span = Span::new(file, start, byte_at(&chars, src, i));
+            if interpolated {
+                segments.push(Segment::Lit(cur));
+                toks.push(Token {
+                    kind: Tok::InterpStr(segments),
+                    span,
+                });
+            } else {
+                toks.push(Token {
+                    kind: Tok::Str(cur),
+                    span,
+                });
+            }
             continue;
         }
 
