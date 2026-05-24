@@ -10,7 +10,7 @@
 //!   |            ^
 //! ```
 
-use crate::span::Span;
+use crate::span::{SourceMap, Span};
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -39,7 +39,8 @@ impl Diagnostic {
     }
 
     /// 人間向けに整形した文字列を返す（末尾に改行を含む）。
-    pub fn render(&self, src: &str, filename: &str) -> String {
+    /// span の `file` から [`SourceMap`] を引き、正しいファイル名・該当行を表示する。
+    pub fn render(&self, sources: &SourceMap) -> String {
         let code = self.code.map(|c| format!("[{}]", c)).unwrap_or_default();
         let mut out = format!("error{}: {}\n", code, self.message);
 
@@ -47,6 +48,9 @@ impl Diagnostic {
             return out;
         };
 
+        let file = sources.get(span.file);
+        let src = file.src.as_str();
+        let filename = file.path.as_str();
         let loc = locate(src, span.start);
         let line_text = &src[loc.line_start..loc.line_end];
         let num = loc.line.to_string();

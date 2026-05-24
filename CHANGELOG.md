@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.34.1]
+
+### Changed
+
+- **Internal: source map for diagnostics.** Spans now carry a `FileId`, and a `SourceMap` owns each file's path and text; `Diagnostic::render` looks the file up by id instead of taking a single source string. This is [RFC 0003](docs/rfcs/0003-module-system.md) step 1 — the prerequisite for multi-file diagnostics that point at the right file. No surface change: single-file builds behave identically (verified by the unchanged error-path tests).
+
 ## [0.34.0]
 
 ### Added
