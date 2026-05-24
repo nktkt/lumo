@@ -105,13 +105,22 @@ impl Parser {
         let mut structs = Vec::new();
         let mut funcs = Vec::new();
         while self.peek() != &Tok::Eof {
+            // 任意の `pub` 修飾子（他ファイルへ公開する）。
+            let is_pub = self.peek() == &Tok::Pub;
+            if is_pub {
+                self.next();
+            }
             match self.peek() {
-                Tok::Struct => structs.push(self.parse_struct()?),
+                Tok::Struct => structs.push(self.parse_struct(is_pub)?),
+                Tok::Fn => funcs.push(self.parse_function(is_pub)?),
                 // import が後から来たら、先頭に置くよう促す（紛れもない誤りを明確に）
                 Tok::Import => {
                     return Err(self.err("import はファイル先頭に置いてください"));
                 }
-                _ => funcs.push(self.parse_function()?),
+                _ if is_pub => {
+                    return Err(self.err("pub の後には fn か struct が必要です"));
+                }
+                _ => funcs.push(self.parse_function(is_pub)?),
             }
         }
         Ok(Program {
@@ -144,7 +153,7 @@ impl Parser {
         })
     }
 
-    fn parse_struct(&mut self) -> Result<StructDef, Diagnostic> {
+    fn parse_struct(&mut self, is_pub: bool) -> Result<StructDef, Diagnostic> {
         let start = self.cur_span().start;
         self.eat(&Tok::Struct)?;
         let (name, _) = self.parse_ident()?;
@@ -176,10 +185,11 @@ impl Parser {
             name,
             fields,
             span: self.span(start, self.last_end),
+            is_pub,
         })
     }
 
-    fn parse_function(&mut self) -> Result<Function, Diagnostic> {
+    fn parse_function(&mut self, is_pub: bool) -> Result<Function, Diagnostic> {
         let start = self.cur_span().start;
         self.eat(&Tok::Fn)?;
         let (name, _) = self.parse_ident()?;
@@ -218,6 +228,7 @@ impl Parser {
             ret,
             body,
             span: self.span(start, self.last_end),
+            is_pub,
         })
     }
 

@@ -354,6 +354,18 @@ fn import_missing_file_errors() {
     run_err("import_missing", "E0105");
 }
 
+/// `pub` items are importable; same-file code reaches private helpers.
+#[test]
+fn module_visibility() {
+    run_ok("visibility");
+}
+
+/// Reaching a private item from another file is rejected.
+#[test]
+fn private_item_across_files_errors() {
+    run_err("vis_private", "E0106");
+}
+
 #[test]
 fn slice_out_of_range_aborts() {
     run_err("slice_oob", "slice out of range");

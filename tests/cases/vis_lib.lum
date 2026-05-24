@@ -1,0 +1,11 @@
+# A library mixing pub (exported) and private (file-local) items, used by the
+# visibility tests. `scale` is private; `boosted` (pub) may still call it since
+# they share a file.
+fn scale(n: int) -> int { return n * 10; }
+
+pub fn boosted(n: int) -> int {
+    return scale(n) + 1;
+}
+
+pub struct Boxed { v: int }
+struct Hidden { v: int }

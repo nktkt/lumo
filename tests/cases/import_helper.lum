@@ -1,5 +1,5 @@
 import "import_util.lum";
 
-struct Pair { a: int, b: int }
+pub struct Pair { a: int, b: int }
 
-fn triple(n: int) -> int { return n + doubled(n); }
+pub fn triple(n: int) -> int { return n + doubled(n); }

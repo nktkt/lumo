@@ -366,16 +366,21 @@ fn main() {
 
 ```lumo
 # geometry.lum
-struct Point { x: int, y: int }
+pub struct Point { x: int, y: int }
 
-fn describe(p: Point) -> string {
+pub fn describe(p: Point) -> string {
     return "(" + str(p.x) + ", " + str(p.y) + ")";
 }
 ```
 
-- **Flat namespace:** every imported file's top-level `struct`s and `fn`s become
-  visible directly (no prefix). Two files defining the same name is a
-  duplicate-definition error.
+- **`pub` visibility:** a top-level `fn`/`struct` is **private to its file** by
+  default; prefix it with `pub` to make it importable. Within its own file a
+  function can always call its private helpers. Reaching a private item from
+  another file — calling it, constructing a private struct, or naming a private
+  struct in a type — is an error (`E0106`). (Reading the fields of a struct
+  *value* you already hold is always allowed.)
+- **Flat namespace:** imported `pub` items are visible directly (no prefix). Two
+  files defining the same name is a duplicate-definition error (names are global).
 - **Loaded once:** each file is read a single time (by canonical path), so a
   *diamond* import (two files both importing a shared one) pulls it in once, and
   import **cycles terminate** safely.
@@ -383,9 +388,11 @@ fn describe(p: Point) -> string {
 - A missing import is reported (`E0105`) at the `import` line, and an error
   *inside* an imported file points at **that** file.
 
-`import` must come before any `struct`/`fn` in a file. This is the v1 design from
-[RFC 0003](rfcs/0003-module-system.md); qualified imports (`import "x" as x;`)
-and `pub` visibility are planned for v2.
+`import` must come before any `struct`/`fn` in a file. Single-file programs need
+no `pub` (everything is same-file). This implements
+[RFC 0003](rfcs/0003-module-system.md) plus `pub` from
+[RFC 0004](rfcs/0004-module-visibility.md); qualified imports
+(`import "x" as x;`) are still planned.
 
 ## Arrays
 

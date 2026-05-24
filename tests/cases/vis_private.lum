@@ -1,0 +1,6 @@
+import "vis_lib.lum";
+
+fn main() {
+    print scale(5);   # error: scale is private to vis_lib.lum
+    return 0;
+}
