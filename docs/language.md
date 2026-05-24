@@ -683,8 +683,9 @@ if (is_int(s)) {
 `int`, `float`, `bool`, `string`, `len`, `str`, `chr`, `read_line`, `push`, `pop`,
 `sorted`, `reversed`, `sqrt`, `pow`, `abs`, `min`, `max`, `floor`, `ceil`, `has`,
 `keys`, `delete`, `substr`, `split`, `join`, `is_int`, `is_float`, `read_file`,
-`write_file`, `to_upper`, `to_lower`, `trim`, `find`, `contains`, `replace`, and
-`repeat` are reserved names — you cannot define a function with one of them.
+`write_file`, `to_upper`, `to_lower`, `trim`, `find`, `contains`, `starts_with`,
+`ends_with`, `replace`, and `repeat` are reserved names — you cannot define a
+function with one of them.
 
 ### `read_line`
 
@@ -776,7 +777,7 @@ print join(split("x-y-z", "-"), "+");  # x+y+z  (round trip)
 To turn a parsed field into a number, use `int(s)` / `float(s)` (guarded by
 `is_int` / `is_float`) — see [Conversions and parsing](#conversions-and-parsing).
 
-### `to_upper` / `to_lower` / `trim` / `find` / `contains` / `replace` / `repeat`
+### `to_upper` / `to_lower` / `trim` / `find` / `contains` / `starts_with` / `ends_with` / `replace` / `repeat`
 
 String methods for normalizing, searching, and rewriting text:
 
@@ -788,6 +789,9 @@ String methods for normalizing, searching, and rewriting text:
   `-1` if it does not occur. An empty `sub` returns `0`.
 - **`contains(s, sub)`** → a `bool`, true when `sub` occurs in `s` (i.e.
   `find(s, sub) >= 0`).
+- **`starts_with(s, prefix)`** / **`ends_with(s, suffix)`** → a `bool`: whether
+  `s` begins / ends with the given affix. An affix longer than `s` is `false`; an
+  empty affix is `true`.
 - **`replace(s, from, to)`** → a new `string` with every occurrence of `from`
   replaced by `to`. `from` may be longer or shorter than `to` (the result grows
   or shrinks); an empty `from` returns `s` unchanged. (It is exactly
@@ -800,6 +804,7 @@ print to_upper("Hello");          # HELLO
 print trim("  hi  ");             # hi   (no surrounding spaces)
 print find("hello", "ll");        # 2
 print contains("hello", "ell");   # true
+print ends_with("main.lum", ".lum");   # true
 print replace("a.b.c", ".", "/"); # a/b/c
 print repeat("=", 10);            # ==========
 

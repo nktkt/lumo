@@ -127,7 +127,7 @@ Status: ✅ done · 🟡 partial · ⬜ not started.
 - [x] A minimal heap runtime (`lumo_alloc`, malloc-backed) powering strings and arrays.
 - [~] **Research spike + RFC**: ownership/borrowing vs tracing GC vs ARC — RFC 0001 drafted; decision still open.
 - [ ] Implement the chosen model; memory **reclamation** (arena/regions) with deterministic cleanup or GC. *(Allocations currently leak.)*
-- [~] Begin the **standard library**: collections, strings, math, basic I/O. *(Arrays + `push`/`pop`/slicing (`a[i:j]`)/`sorted`/`reversed` (v0.32–0.33), math built-ins, an associative `map` type — [RFC 0002](docs/rfcs/0002-map-type.md), shipped in v0.24 — **nested collections** (`[[T]]`, `{string: [V]}`, v0.29), the string toolkit (`substr`/`split`/`join`, `to_upper`/`to_lower`/`trim`/`find`/`contains`/`replace`/`repeat`, slicing, + `int`/`float`/`is_int`/`is_float` parsing), and file I/O (`read_file`/`write_file`, v0.28) are done; more stdlib ongoing.)*
+- [~] Begin the **standard library**: collections, strings, math, basic I/O. *(Arrays + `push`/`pop`/slicing (`a[i:j]`)/`sorted`/`reversed` (v0.32–0.33), math built-ins, an associative `map` type — [RFC 0002](docs/rfcs/0002-map-type.md), shipped in v0.24 — **nested collections** (`[[T]]`, `{string: [V]}`, v0.29), the string toolkit (`substr`/`split`/`join`, `to_upper`/`to_lower`/`trim`/`find`/`contains`/`starts_with`/`ends_with`/`replace`/`repeat`, slicing, + `int`/`float`/`is_int`/`is_float` parsing), and file I/O (`read_file`/`write_file`, v0.28) are done; more stdlib ongoing.)*
 - [ ] Formalize the runtime (replace ad-hoc `printf` with a real runtime/stdlib boundary).
 
 **Exit:** programs that allocate and free memory run without leaks under the chosen model.

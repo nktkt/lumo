@@ -788,6 +788,22 @@ impl FnChecker<'_> {
                     });
                 }
 
+                // 文字列メソッド: starts_with(s, prefix) / ends_with(s, suffix) -> bool
+                if matches!(name.as_str(), "starts_with" | "ends_with") {
+                    if args.len() != 2 {
+                        return Err(Diagnostic::error(format!(
+                            "{}() は引数2個ですが {} 個渡されました",
+                            name,
+                            args.len()
+                        ))
+                        .with_code("E0104")
+                        .at(e.span));
+                    }
+                    expect(Type::Str, self.check_expr(&args[0])?, args[0].span)?;
+                    expect(Type::Str, self.check_expr(&args[1])?, args[1].span)?;
+                    return Ok(Type::Bool);
+                }
+
                 // 文字列メソッド: replace(s, from, to) -> string（from の全出現を置換）
                 if name == "replace" {
                     if args.len() != 3 {
@@ -1248,6 +1264,8 @@ fn is_reserved_name(name: &str) -> bool {
             | "trim"
             | "find"
             | "contains"
+            | "starts_with"
+            | "ends_with"
             | "replace"
             | "repeat"
     )

@@ -299,6 +299,11 @@ fn string_replace_repeat() {
 }
 
 #[test]
+fn string_affix_predicates() {
+    run_ok("affix");
+}
+
+#[test]
 fn slice_and_pop() {
     run_ok("slice_pop");
 }

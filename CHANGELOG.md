@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com), and this 
 
 - _Nothing yet._
 
+## [0.36.0]
+
+### Added
+
+- **String `starts_with` / `ends_with`** — `starts_with(s, prefix)` and `ends_with(s, suffix)` return a `bool` for prefix/suffix tests, completing the search family alongside `find`/`contains`. An affix longer than `s` is `false`; an empty affix is `true`. (Both share a `lumo_str_has_affix` runtime helper that length-guards before reusing `lumo_str_eq_at`.)
+
 ## [0.35.0]
 
 ### Added

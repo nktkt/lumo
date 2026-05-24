@@ -1,0 +1,22 @@
+# String prefix/suffix predicates: starts_with / ends_with.
+
+fn main() {
+    print starts_with("hello world", "hello");  # true
+    print starts_with("hello", "hello");        # true   (equal)
+    print starts_with("hi", "hello");           # false  (prefix longer than string)
+    print starts_with("hello", "");             # true   (empty prefix)
+    print starts_with("hello", "world");        # false
+    print starts_with("hello", "h");            # true
+
+    print ends_with("hello world", "world");    # true
+    print ends_with("hello", "hello");          # true   (equal)
+    print ends_with("hi", "hello");             # false  (suffix longer than string)
+    print ends_with("hello", "");               # true   (empty suffix)
+    print ends_with("hello", "lo");             # true
+    print ends_with("hello", "lx");             # false
+    print ends_with("main.lum", ".lum");        # true   (file-extension check)
+
+    # compose with the rest of the toolkit
+    print starts_with(to_lower("HELLO"), "he"); # true
+    return 0;
+}
