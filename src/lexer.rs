@@ -2,7 +2,7 @@
 //! 各トークンはソース上の位置 (Span) を持つ。
 
 use crate::diagnostics::Diagnostic;
-use crate::span::Span;
+use crate::span::{FileId, Span};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tok {
@@ -78,7 +78,7 @@ fn byte_at(chars: &[(usize, char)], src: &str, i: usize) -> usize {
     }
 }
 
-pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
+pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
     let chars: Vec<(usize, char)> = src.char_indices().collect();
     let n = chars.len();
     let mut toks = Vec::new();
@@ -110,7 +110,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                 if i >= n || chars[i].1 == '\n' {
                     return Err(Diagnostic::error("文字列が閉じられていません")
                         .with_code("E0004")
-                        .at(Span::new(start, byte_at(&chars, src, i))));
+                        .at(Span::new(file, start, byte_at(&chars, src, i))));
                 }
                 let ch = chars[i].1;
                 if ch == '"' {
@@ -123,7 +123,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                     if i >= n {
                         return Err(Diagnostic::error("文字列が閉じられていません")
                             .with_code("E0004")
-                            .at(Span::new(start, src.len())));
+                            .at(Span::new(file, start, src.len())));
                     }
                     let decoded = match chars[i].1 {
                         'n' => '\n',
@@ -138,7 +138,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                                 other
                             ))
                             .with_code("E0004")
-                            .at(Span::new(esc_start, byte_at(&chars, src, i + 1))));
+                            .at(Span::new(file, esc_start, byte_at(&chars, src, i + 1))));
                         }
                     };
                     s.push(decoded);
@@ -150,7 +150,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             }
             toks.push(Token {
                 kind: Tok::Str(s),
-                span: Span::new(start, byte_at(&chars, src, i)),
+                span: Span::new(file, start, byte_at(&chars, src, i)),
             });
             continue;
         }
@@ -169,7 +169,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                     i += 1;
                 }
             }
-            let span = Span::new(off, byte_at(&chars, src, i));
+            let span = Span::new(file, off, byte_at(&chars, src, i));
             let s: String = chars[begin..i].iter().map(|(_, ch)| *ch).collect();
             let kind = if is_float {
                 let v: f64 = s.parse().map_err(|_| {
@@ -196,7 +196,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             while i < n && (chars[i].1.is_alphanumeric() || chars[i].1 == '_') {
                 i += 1;
             }
-            let span = Span::new(off, byte_at(&chars, src, i));
+            let span = Span::new(file, off, byte_at(&chars, src, i));
             let s: String = chars[begin..i].iter().map(|(_, ch)| *ch).collect();
             let kind = match s.as_str() {
                 "fn" => Tok::Fn,
@@ -238,7 +238,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
                 _ => None,
             };
             if let Some(kind) = kind {
-                let span = Span::new(off, byte_at(&chars, src, i + 2));
+                let span = Span::new(file, off, byte_at(&chars, src, i + 2));
                 toks.push(Token { kind, span });
                 i += 2;
                 continue;
@@ -269,19 +269,19 @@ pub fn lex(src: &str) -> Result<Vec<Token>, Diagnostic> {
             _ => {
                 return Err(Diagnostic::error(format!("不正な文字: '{}'", c))
                     .with_code("E0001")
-                    .at(Span::new(off, off + c.len_utf8())));
+                    .at(Span::new(file, off, off + c.len_utf8())));
             }
         };
         toks.push(Token {
             kind,
-            span: Span::new(off, off + c.len_utf8()),
+            span: Span::new(file, off, off + c.len_utf8()),
         });
         i += 1;
     }
 
     toks.push(Token {
         kind: Tok::Eof,
-        span: Span::new(src.len(), src.len()),
+        span: Span::new(file, src.len(), src.len()),
     });
     Ok(toks)
 }

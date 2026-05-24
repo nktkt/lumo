@@ -7,14 +7,17 @@
 use crate::ast::*;
 use crate::diagnostics::Diagnostic;
 use crate::lexer::{Tok, Token};
-use crate::span::Span;
+use crate::span::{FileId, Span};
 use crate::types::{intern, Type};
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program, Diagnostic> {
+    // 全トークンは同じファイル由来。空入力でも Eof があるので first() で取れる。
+    let file = tokens.first().map(|t| t.span.file).unwrap_or(FileId(0));
     let mut p = Parser {
         toks: tokens,
         pos: 0,
         last_end: 0,
+        file,
     };
     p.parse_program()
 }
@@ -24,9 +27,16 @@ struct Parser {
     pos: usize,
     /// 直前に消費したトークンの終了オフセット（ノードの span 終端に使う）
     last_end: usize,
+    /// 解析中のファイル（全ノードの span に付与する）
+    file: FileId,
 }
 
 impl Parser {
+    /// 解析中ファイルの span を作る。
+    fn span(&self, start: usize, end: usize) -> Span {
+        Span::new(self.file, start, end)
+    }
+
     fn peek(&self) -> &Tok {
         &self.toks[self.pos].kind
     }
@@ -129,7 +139,7 @@ impl Parser {
         Ok(StructDef {
             name,
             fields,
-            span: Span::new(start, self.last_end),
+            span: self.span(start, self.last_end),
         })
     }
 
@@ -171,7 +181,7 @@ impl Parser {
             params,
             ret,
             body,
-            span: Span::new(start, self.last_end),
+            span: self.span(start, self.last_end),
         })
     }
 
@@ -190,7 +200,7 @@ impl Parser {
             Tok::LBracket => {
                 let (elem_ty, _) = self.parse_type()?;
                 self.eat(&Tok::RBracket)?;
-                let full = Span::new(span.start, self.last_end);
+                let full = self.span(span.start, self.last_end);
                 // 型注釈に null は書けないので as_elem は必ず Some
                 let elem = elem_ty.as_elem().expect("型注釈に null は現れない");
                 Ok((Type::Array(elem), full))
@@ -209,7 +219,7 @@ impl Parser {
                 self.eat(&Tok::Colon)?;
                 let (val_ty, _) = self.parse_type()?;
                 self.eat(&Tok::RBrace)?;
-                let full = Span::new(span.start, self.last_end);
+                let full = self.span(span.start, self.last_end);
                 let v = val_ty.as_elem().expect("型注釈に null は現れない");
                 Ok((Type::Map(v), full))
             }
@@ -347,7 +357,7 @@ impl Parser {
         };
         Ok(Stmt {
             kind,
-            span: Span::new(start, self.last_end),
+            span: self.span(start, self.last_end),
         })
     }
 
@@ -375,7 +385,7 @@ impl Parser {
         };
         Ok(Stmt {
             kind,
-            span: Span::new(start, self.last_end),
+            span: self.span(start, self.last_end),
         })
     }
 
@@ -398,7 +408,7 @@ impl Parser {
         } else if let Some(op) = compound {
             self.next();
             let value = self.parse_expr()?;
-            let span = Span::new(e.span.start, self.last_end);
+            let span = self.span(e.span.start, self.last_end);
             let combined = Expr {
                 kind: ExprKind::Binary {
                     op,
@@ -533,7 +543,7 @@ impl Parser {
                         Some(self.parse_expr()?)
                     };
                     self.eat(&Tok::RBracket)?;
-                    let span = Span::new(e.span.start, self.last_end);
+                    let span = self.span(e.span.start, self.last_end);
                     e = Expr {
                         kind: ExprKind::Slice {
                             seq: Box::new(e),
@@ -546,7 +556,7 @@ impl Parser {
                     // `:` が無ければ添字。lo は必ず Some（先頭が `:` なら上で slice 側へ）。
                     let index = lo.expect("添字には式があるはず");
                     self.eat(&Tok::RBracket)?;
-                    let span = Span::new(e.span.start, self.last_end);
+                    let span = self.span(e.span.start, self.last_end);
                     e = Expr {
                         kind: ExprKind::Index {
                             array: Box::new(e),
@@ -558,7 +568,7 @@ impl Parser {
             } else if self.peek() == &Tok::Dot {
                 self.next();
                 let (field, _) = self.parse_ident()?;
-                let span = Span::new(e.span.start, self.last_end);
+                let span = self.span(e.span.start, self.last_end);
                 e = Expr {
                     kind: ExprKind::Field {
                         obj: Box::new(e),
@@ -625,7 +635,7 @@ impl Parser {
                 self.eat(&Tok::RBracket)?;
                 Ok(Expr {
                     kind: ExprKind::Array(elems),
-                    span: Span::new(span.start, self.last_end),
+                    span: self.span(span.start, self.last_end),
                 })
             }
             // map リテラル {key: value, ...}（先頭が名前なら構造体リテラルなので、
@@ -652,7 +662,7 @@ impl Parser {
                 self.eat(&Tok::RBrace)?;
                 Ok(Expr {
                     kind: ExprKind::MapLit(pairs),
-                    span: Span::new(span.start, self.last_end),
+                    span: self.span(span.start, self.last_end),
                 })
             }
             Tok::Ident(name) => {
@@ -673,7 +683,7 @@ impl Parser {
                     self.eat(&Tok::RParen)?;
                     Ok(Expr {
                         kind: ExprKind::Call { name, args },
-                        span: Span::new(span.start, self.last_end),
+                        span: self.span(span.start, self.last_end),
                     })
                 } else if self.peek() == &Tok::LBrace {
                     // 構造体リテラル Name { field: value, ... }
@@ -685,7 +695,7 @@ impl Parser {
                             self.eat(&Tok::Colon)?;
                             let value = self.parse_expr()?;
                             fields.push(FieldInit {
-                                span: Span::new(fname_span.start, value.span.end),
+                                span: self.span(fname_span.start, value.span.end),
                                 name: fname,
                                 value,
                             });
@@ -702,7 +712,7 @@ impl Parser {
                     self.eat(&Tok::RBrace)?;
                     Ok(Expr {
                         kind: ExprKind::StructLit { name, fields },
-                        span: Span::new(span.start, self.last_end),
+                        span: self.span(span.start, self.last_end),
                     })
                 } else {
                     Ok(Expr {

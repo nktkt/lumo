@@ -14,10 +14,11 @@ mod typeck;
 mod types;
 
 use diagnostics::Diagnostic;
+use span::SourceMap;
 use std::process::exit;
 
 fn usage() -> ! {
-    eprintln!("Lumo compiler 0.34");
+    eprintln!("Lumo compiler 0.34.1");
     eprintln!("使い方:");
     eprintln!("  lumo <command> [-O0|-O1|-O2|-O3] <file.lum>");
     eprintln!();
@@ -57,19 +58,23 @@ fn main() {
         exit(1);
     });
 
+    // ソースマップに登録。複数ファイル対応時はここに import 先も足していく。
+    let mut sources = SourceMap::new();
+    let fid = sources.add(path.clone(), src);
+
     // 字句解析・構文解析・型検査・コード生成。エラーは位置付き診断として表示する。
     let context = inkwell::context::Context::create();
     let mut cg = codegen::CodeGen::new(&context, "lumo");
 
     let compiled: Result<(), Diagnostic> = (|| {
-        let tokens = lexer::lex(&src)?;
+        let tokens = lexer::lex(&sources.get(fid).src, fid)?;
         let program = parser::parse(tokens)?;
         typeck::check(&program)?;
         cg.compile(&program)
     })();
 
     if let Err(diag) = compiled {
-        eprint!("{}", diag.render(&src, &path));
+        eprint!("{}", diag.render(&sources));
         exit(1);
     }
 
