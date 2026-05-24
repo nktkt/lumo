@@ -313,6 +313,17 @@ fn compound_assignment() {
     run_ok("compound_assign");
 }
 
+/// Multi-file: import another file's structs/functions; diamond import is deduped.
+#[test]
+fn module_import() {
+    run_ok("import_main");
+}
+
+#[test]
+fn import_missing_file_errors() {
+    run_err("import_missing", "E0105");
+}
+
 #[test]
 fn slice_out_of_range_aborts() {
     run_err("slice_oob", "slice out of range");

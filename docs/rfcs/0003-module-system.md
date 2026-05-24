@@ -1,6 +1,10 @@
 # RFC 0003 — A module system (`import`) for multi-file Lumo programs
 
-- **Status:** Proposed (draft).
+- **Status:** v1 implemented (`v0.35.0`). The recommended v1 below shipped:
+  path-based `import "..."`, flat namespace, public-by-default, dedup +
+  cycle-safe resolution, one merged LLVM module. The source-map prerequisite
+  shipped first in `v0.34.1` (step 1). Remaining (v2): qualified imports
+  (`import "x" as x; x.item`) and `pub` visibility.
 - **Author:** Lumo contributors
 - **Created:** 2026-05-24
 - **Targets roadmap phase:** Phase 5 — Modules & packages (`v0.6`), the

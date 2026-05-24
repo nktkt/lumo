@@ -1,0 +1,3 @@
+import "this_file_does_not_exist.lum";
+
+fn main() { return 0; }

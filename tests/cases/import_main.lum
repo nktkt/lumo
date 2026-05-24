@@ -1,0 +1,13 @@
+# Multi-file program: import brings in another file's structs and functions.
+# import_util arrives via both import_helper.lum and directly here, but is
+# loaded once (dedup), so doubled() is not a duplicate definition.
+import "import_helper.lum";
+import "import_util.lum";
+
+fn main() {
+    print doubled(10);       # 20  (from import_util.lum)
+    print triple(5);         # 15  (from import_helper.lum: 5 + doubled(5))
+    let p = Pair { a: 3, b: 4 };   # struct from import_helper.lum
+    print p.a + p.b;         # 7
+    return 0;
+}

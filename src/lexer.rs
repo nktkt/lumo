@@ -14,6 +14,7 @@ pub enum Tok {
     // キーワード
     Fn,
     Struct,
+    Import,
     Let,
     If,
     Else,
@@ -205,6 +206,7 @@ pub fn lex(src: &str, file: FileId) -> Result<Vec<Token>, Diagnostic> {
             let kind = match s.as_str() {
                 "fn" => Tok::Fn,
                 "struct" => Tok::Struct,
+                "import" => Tok::Import,
                 "let" => Tok::Let,
                 "if" => Tok::If,
                 "else" => Tok::Else,

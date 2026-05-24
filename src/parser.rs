@@ -96,16 +96,52 @@ impl Parser {
     }
 
     fn parse_program(&mut self) -> Result<Program, Diagnostic> {
+        // import 宣言はファイル先頭にまとめて置く。
+        let mut imports = Vec::new();
+        while self.peek() == &Tok::Import {
+            imports.push(self.parse_import()?);
+        }
+
         let mut structs = Vec::new();
         let mut funcs = Vec::new();
         while self.peek() != &Tok::Eof {
-            if self.peek() == &Tok::Struct {
-                structs.push(self.parse_struct()?);
-            } else {
-                funcs.push(self.parse_function()?);
+            match self.peek() {
+                Tok::Struct => structs.push(self.parse_struct()?),
+                // import が後から来たら、先頭に置くよう促す（紛れもない誤りを明確に）
+                Tok::Import => {
+                    return Err(self.err("import はファイル先頭に置いてください"));
+                }
+                _ => funcs.push(self.parse_function()?),
             }
         }
-        Ok(Program { structs, funcs })
+        Ok(Program {
+            imports,
+            structs,
+            funcs,
+        })
+    }
+
+    /// `import "相対パス.lum";`
+    fn parse_import(&mut self) -> Result<ImportDecl, Diagnostic> {
+        let start = self.cur_span().start;
+        self.eat(&Tok::Import)?;
+        let path_span = self.cur_span();
+        let path = match self.next().kind {
+            Tok::Str(s) => s,
+            other => {
+                return Err(Diagnostic::error(format!(
+                    "import にはパス文字列が必要ですが {:?} が来ました",
+                    other
+                ))
+                .with_code("E0002")
+                .at(path_span));
+            }
+        };
+        self.eat(&Tok::Semicolon)?;
+        Ok(ImportDecl {
+            path,
+            span: self.span(start, self.last_end),
+        })
     }
 
     fn parse_struct(&mut self) -> Result<StructDef, Diagnostic> {

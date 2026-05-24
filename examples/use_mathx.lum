@@ -1,0 +1,14 @@
+# Multi-file program: a `main` that pulls in a helper library with `import`.
+# The path is resolved relative to this file, so "lib/mathx.lum" means
+# examples/lib/mathx.lum. The library's functions are then callable directly.
+#
+#   cargo run -- run examples/use_mathx.lum
+#   -> gcd(24, 36) = 12 / lcm(4, 6) = 12
+
+import "lib/mathx.lum";
+
+fn main() {
+    print "gcd(24, 36) = " + str(gcd(24, 36));   # 12
+    print "lcm(4, 6) = " + str(lcm(4, 6));        # 12
+    return 0;
+}

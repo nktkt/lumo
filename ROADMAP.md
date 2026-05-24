@@ -135,7 +135,7 @@ Status: ✅ done · 🟡 partial · ⬜ not started.
 ### Phase 5 — Modules & packages (`v0.6`)
 *Code in the large.*
 
-- **Module system**: files/namespaces, `import`/`pub`, visibility rules. *(Design drafted in [RFC 0003](docs/rfcs/0003-module-system.md): path-based `import`, flat-namespace v1, and the span/source-map refactor it needs.)*
+- [~] **Module system**: files/namespaces, `import`/`pub`, visibility rules. *([RFC 0003](docs/rfcs/0003-module-system.md): path-based `import` with flat-namespace v1 shipped in v0.35.0 — multi-file programs work. Remaining: qualified imports and `pub` visibility (v2).)*
 - **FFI**: `extern` declarations for C interop, formalized.
 - **Package manager** (`lumo add/build/test`) with lockfiles + a registry **alpha**.
 - Multi-file compilation.
