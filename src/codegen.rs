@@ -1940,6 +1940,69 @@ impl<'ctx> CodeGen<'ctx> {
                 .unwrap();
         }
 
+        // --- i1 lumo_str_has_affix(ptr s, ptr affix, i1 at_end) ---
+        // at_end=0 で前方一致(starts_with)、1 で後方一致(ends_with)。
+        // affix が s より長ければ false。さもなくば eq_at で照合する。
+        let affix_fn = self.module.add_function(
+            "lumo_str_has_affix",
+            i1t.fn_type(&[ptr.into(), ptr.into(), i1t.into()], false),
+            None,
+        );
+        {
+            let entry = self.ctx.append_basic_block(affix_fn, "entry");
+            let check_bb = self.ctx.append_basic_block(affix_fn, "check");
+            let no_bb = self.ctx.append_basic_block(affix_fn, "no");
+            let s = affix_fn.get_nth_param(0).unwrap().into_pointer_value();
+            let affix = affix_fn.get_nth_param(1).unwrap().into_pointer_value();
+            let at_end = affix_fn.get_nth_param(2).unwrap().into_int_value();
+            self.builder.position_at_end(entry);
+            let strlen = self.module.get_function("strlen").unwrap();
+            let slen = self
+                .builder
+                .build_call(strlen, &[s.into()], "slen")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            let alen = self
+                .builder
+                .build_call(strlen, &[affix.into()], "alen")
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic()
+                .into_int_value();
+            // affix が s より長ければ即 false（範囲外参照も防ぐ）
+            let fits = self
+                .builder
+                .build_int_compare(IntPredicate::ULE, alen, slen, "fits")
+                .unwrap();
+            self.builder
+                .build_conditional_branch(fits, check_bb, no_bb)
+                .unwrap();
+            self.builder.position_at_end(no_bb);
+            self.builder.build_return(Some(&i1t.const_zero())).unwrap();
+            self.builder.position_at_end(check_bb);
+            // off = at_end ? slen - alen : 0
+            let tail = self.builder.build_int_sub(slen, alen, "tail").unwrap();
+            let off = self
+                .builder
+                .build_select(at_end, tail, i64t.const_zero(), "off")
+                .unwrap()
+                .into_int_value();
+            let eqat = self.module.get_function("lumo_str_eq_at").unwrap();
+            let eq = self
+                .builder
+                .build_call(
+                    eqat,
+                    &[s.into(), off.into(), affix.into(), alen.into()],
+                    "eq",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .unwrap_basic();
+            self.builder.build_return(Some(&eq)).unwrap();
+        }
+
         // --- ptr lumo_trim(ptr s): 前後の ASCII 空白(空白/タブ/改行/復帰)を除いた新規文字列 ---
         let trim_fn =
             self.module
@@ -3925,6 +3988,22 @@ impl<'ctx> CodeGen<'ctx> {
                         .unwrap();
                     (found.into(), Type::Bool)
                 }
+            }
+            ExprKind::Call { name, args } if name == "starts_with" || name == "ends_with" => {
+                let (sv, _) = self.gen_expr(&args[0]);
+                let (av, _) = self.gen_expr(&args[1]);
+                let at_end = self
+                    .ctx
+                    .bool_type()
+                    .const_int((name == "ends_with") as u64, false);
+                let f = self.module.get_function("lumo_str_has_affix").unwrap();
+                let r = self
+                    .builder
+                    .build_call(f, &[sv.into(), av.into(), at_end.into()], "affix")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .unwrap_basic();
+                (r, Type::Bool)
             }
             ExprKind::Call { name, args } if name == "replace" => {
                 // replace(s, from, to) == join(split(s, from), to)。split は空 from で
